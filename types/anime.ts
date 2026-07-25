@@ -28,11 +28,27 @@ export interface AnimeDetail extends Anime {
   episodeDuration?: string;
   views?: number;
   episodeList?: Episode[];
+  ratingText?: string;
+  viewsText?: string;
+  category?: string;
+  audio?: string;
+  season?: string;
+  nextEpisode?: string;
+  anilistLink?: string;
+  myanimelistLink?: string;
+}
+
+export interface TopAnimeSections {
+  day: Anime[];
+  week: Anime[];
+  month: Anime[];
 }
 
 export interface HomePageSections {
   newAdditions: Anime[];
   randomAnime: Anime[];
+  carousel: CarouselItem[];
+  topAnime?: TopAnimeSections;
 }
 
 export interface CarouselItem {

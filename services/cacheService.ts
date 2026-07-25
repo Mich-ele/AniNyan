@@ -1,17 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Anime, AnimeDetail } from '../types/anime';
-
+import { getAnimeEpisodeNumbers } from '../utils/episodeUtils';
 const WATCHED_EPISODES_PREFIX = 'watched_episodes_';
 const ANIME_DETAILS_PREFIX = 'anime_details_';
 const WATCHLIST_PREFIX = 'watchlist_';
-
-// Helper to get all keys with a specific prefix
 const getKeysWithPrefix = async (prefix: string) => {
   const allKeys = await AsyncStorage.getAllKeys();
   return allKeys.filter(key => key.startsWith(prefix));
 };
-
-// Get watched episodes for a single anime
 export const getWatchedEpisodes = async (animeId: string): Promise<Set<number>> => {
   try {
     const jsonValue = await AsyncStorage.getItem(`${WATCHED_EPISODES_PREFIX}${animeId}`);
@@ -21,8 +17,6 @@ export const getWatchedEpisodes = async (animeId: string): Promise<Set<number>> 
     return new Set();
   }
 };
-
-// Add a watched episode for an anime
 export const addWatchedEpisode = async (anime: AnimeDetail, episodeNumber: number): Promise<void> => {
   try {
     const animeId = anime.id;
@@ -30,72 +24,70 @@ export const addWatchedEpisode = async (anime: AnimeDetail, episodeNumber: numbe
     watchedEpisodes.add(episodeNumber);
     const jsonValue = JSON.stringify(Array.from(watchedEpisodes));
     await AsyncStorage.setItem(`${WATCHED_EPISODES_PREFIX}${animeId}`, jsonValue);
-    
-    // Also cache anime details for the continue watching list
     const detailsToCache = {
       id: anime.id,
       title: anime.title,
       image: anime.image,
       url: anime.url,
       existEpisodes: anime.existEpisodes,
+      description: anime.description,
+      genres: anime.genres,
+      category: anime.category,
+      audio: anime.audio,
+      ratingText: anime.ratingText,
+      viewsText: anime.viewsText,
+      episodeList: anime.episodeList
     };
     await AsyncStorage.setItem(`${ANIME_DETAILS_PREFIX}${animeId}`, JSON.stringify(detailsToCache));
-
   } catch (e) {
     console.error('Failed to add watched episode to cache.', e);
   }
 };
-
-// Remove a watched episode for an anime
 export const removeWatchedEpisode = async (animeId: string, episodeNumber: number): Promise<void> => {
   try {
     const watchedEpisodes = await getWatchedEpisodes(animeId);
     watchedEpisodes.delete(episodeNumber);
-
-    // If the list of watched episodes is now empty, remove the anime details as well
     if (watchedEpisodes.size === 0) {
       await AsyncStorage.removeItem(`${ANIME_DETAILS_PREFIX}${animeId}`);
     }
-
     const jsonValue = JSON.stringify(Array.from(watchedEpisodes));
     await AsyncStorage.setItem(`${WATCHED_EPISODES_PREFIX}${animeId}`, jsonValue);
   } catch (e) {
     console.error('Failed to remove watched episode from cache.', e);
   }
 };
-
-// Get list of animes to continue watching
-export const getContinueWatchingList = async (): Promise<{ anime: Anime; nextEpisode: number }[]> => {
+export const getContinueWatchingList = async (): Promise<{
+  anime: Anime;
+  nextEpisode: number;
+}[]> => {
   try {
     const animeDetailKeys = await getKeysWithPrefix(ANIME_DETAILS_PREFIX);
     const continueWatchingList = [];
-
     for (const key of animeDetailKeys) {
       const animeId = key.replace(ANIME_DETAILS_PREFIX, '');
-      const [detailsJson, watchedEpisodes] = await Promise.all([
-        AsyncStorage.getItem(key),
-        getWatchedEpisodes(animeId),
-      ]);
-
+      const [detailsJson, watchedEpisodes] = await Promise.all([AsyncStorage.getItem(key), getWatchedEpisodes(animeId)]);
       if (detailsJson) {
-        const anime: Anime = JSON.parse(detailsJson);
-        const lastWatched = Math.max(0, ...Array.from(watchedEpisodes));
-        const nextEpisode = lastWatched + 1;
-
-        if (anime.existEpisodes && nextEpisode <= anime.existEpisodes) {
-          continueWatchingList.push({ anime, nextEpisode });
+        const anime = JSON.parse(detailsJson) as AnimeDetail;
+        const episodeNumbers = getAnimeEpisodeNumbers(anime);
+        const lastWatchedIndex = episodeNumbers.reduce(
+          (latestIndex, episodeNumber, index) => watchedEpisodes.has(episodeNumber) ? index : latestIndex,
+          -1,
+        );
+        const nextEpisode = episodeNumbers[lastWatchedIndex + 1];
+        if (nextEpisode !== undefined) {
+          continueWatchingList.push({
+            anime,
+            nextEpisode
+          });
         }
       }
     }
-
     return continueWatchingList.sort((a, b) => a.anime.title.localeCompare(b.anime.title));
   } catch (e) {
     console.error('Failed to get continue watching list.', e);
     return [];
   }
 };
-
-// Check if an anime is in the watchlist
 export const isAnimeInWatchlist = async (animeId: string): Promise<boolean> => {
   try {
     const item = await AsyncStorage.getItem(`${WATCHLIST_PREFIX}${animeId}`);
@@ -105,8 +97,6 @@ export const isAnimeInWatchlist = async (animeId: string): Promise<boolean> => {
     return false;
   }
 };
-
-// Add an anime to the watchlist
 export const addToWatchlist = async (anime: AnimeDetail): Promise<void> => {
   try {
     const jsonValue = JSON.stringify(anime);
@@ -115,8 +105,6 @@ export const addToWatchlist = async (anime: AnimeDetail): Promise<void> => {
     console.error('Failed to add to watchlist.', e);
   }
 };
-
-// Remove an anime from the watchlist
 export const removeFromWatchlist = async (animeId: string): Promise<void> => {
   try {
     await AsyncStorage.removeItem(`${WATCHLIST_PREFIX}${animeId}`);
@@ -124,8 +112,6 @@ export const removeFromWatchlist = async (animeId: string): Promise<void> => {
     console.error('Failed to remove from watchlist.', e);
   }
 };
-
-// Get all anime from the watchlist
 export const getWatchlist = async (): Promise<AnimeDetail[]> => {
   try {
     const watchlistKeys = await getKeysWithPrefix(WATCHLIST_PREFIX);

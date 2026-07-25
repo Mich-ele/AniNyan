@@ -1,42 +1,92 @@
 {
   "expo": {
-    "name": "bolt-expo-nativewind",
-    "slug": "bolt-expo-nativewind",
+    "name": "AniNyan",
+    "slug": "nyan",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
     "scheme": "myapp",
+    "icon": "./assets/images/app-icon.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.anime.nyan",
+      "versionCode": 5,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-foreground.png",
+        "backgroundColor": "#000000"
+      },
+      "permissions": [
+        "INTERNET",
+        "WAKE_LOCK"
+      ],
+      "softwareKeyboardLayoutMode": "pan"
     },
     "web": {
       "backgroundColor": "#000000",
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/app-icon.png"
     },
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-web-browser",
       [
         "expo-video",
         {
           "supportsBackgroundPlayback": true,
           "supportsPictureInPicture": true
         }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#000000",
+          "image": "./assets/images/app-icon.png",
+          "resizeMode": "contain",
+          "dark": {
+            "image": "./assets/images/app-icon.png",
+            "backgroundColor": "#000000"
+          },
+          "light": {
+            "image": "./assets/images/app-icon.png",
+            "backgroundColor": "#000000"
+          },
+          "imageWidth": 200
+        }
+      ],
+      [
+        "react-native-google-cast",
+        {
+          "receiverAppId": "CC1AD845"
+        }
       ]
     ],
+    "splash": {
+      "backgroundColor": "#000000",
+      "image": "./assets/images/app-icon.png",
+      "resizeMode": "contain"
+    },
     "experiments": {
       "typedRoutes": true
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#000000",
+      "barStyle": "light-content"
     },
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "5e4d401e-1566-402b-954f-0ccb8166d9ba"
+        "projectId": "672662b8-1093-45a6-a38f-98df2aa6d196"
       }
-    }
+    },
+    "owner": "mich-ele"
   }
 }

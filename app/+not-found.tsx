@@ -1,5 +1,5 @@
 import { Link, Stack } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FileQuestion } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -12,7 +12,7 @@ export default function NotFoundScreen() {
       <Animated.View entering={FadeInDown.delay(200)} style={styles.content}>
         <FileQuestion size={48} color={theme.colorPalette.accent.primary} />
         <Text style={styles.title}>Oops!</Text>
-        <Text style={styles.subtitle}>This screen doesn't exist.</Text>
+        <Text style={styles.subtitle}>This screen does not exist.</Text>
         <Link href="/" style={styles.link}>
           <Text style={styles.linkText}>Go to home screen</Text>
         </Link>
@@ -37,11 +37,13 @@ const styles = StyleSheet.create({
     fontWeight: fw(theme.typography.weights.bold),
     color: theme.colorPalette.text.primary,
     marginTop: px(theme.spacing.md),
+    fontFamily: theme.typography.fontFamily.primaryBold,
   },
   subtitle: {
     fontSize: px(theme.typography.sizes.body),
     color: theme.colorPalette.text.secondary,
     marginTop: px(theme.spacing.sm),
+    fontFamily: theme.typography.fontFamily.primary,
   },
   link: {
     marginTop: px(theme.spacing.xl),
@@ -53,5 +55,6 @@ const styles = StyleSheet.create({
   linkText: {
     color: theme.colorPalette.text.primary,
     fontWeight: fw(theme.typography.weights.medium),
+    fontFamily: theme.typography.fontFamily.primary,
   },
 });

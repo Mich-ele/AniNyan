@@ -1,5 +1,6 @@
 import React from 'react';
 import { Animated, View, StyleSheet } from 'react-native';
+import theme from '../app/styles/theme';
 
 interface Props {
   position: number;
@@ -8,7 +9,7 @@ interface Props {
   scale: Animated.Value;
 }
 
-const THUMB_SIZE = 28;
+const THUMB_SIZE = 22;
 
 const VideoPlayerCustomThumb: React.FC<Props> = ({ position, sliderWidth, isActive, scale }) => {
   const left = sliderWidth * position;
@@ -36,21 +37,21 @@ const styles = StyleSheet.create({
     width: THUMB_SIZE,
     height: THUMB_SIZE,
     borderRadius: THUMB_SIZE / 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    backgroundColor: theme.colorPalette.accent.primary,
     borderWidth: 2,
     borderColor: '#fff',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
+    shadowRadius: 3,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 20,
   },
   innerDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#fff',
   },
 });
 
