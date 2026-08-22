@@ -1,16 +1,26 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Animated, Pressable, Text } from 'react-native';
+import { View, StyleSheet, Animated, Pressable, Text, Platform, PermissionsAndroid } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
+import type { CastSession, MediaStatus } from 'react-native-google-cast';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as Haptics from 'expo-haptics';
 import * as NavigationBar from 'expo-navigation-bar';
 import { StatusBar } from 'expo-status-bar';
-import { Platform, PermissionsAndroid } from 'react-native';
-import { isExpoGo, useSafeRemoteMediaClient, useSafeCastSession } from '../../components/SafeCastButton';
+import {
+  endSafeCastSession,
+  isExpoGo,
+  startSafeCastDiscovery,
+  useSafeCastSession,
+  useSafeCastState,
+} from '../../components/SafeCastButton';
 
 import { VideoPlayerControls } from '../../components/VideoPlayerControls';
+import { addWatchedEpisode } from '../../services/cacheService';
+import { fetchAnimeDetailsWithScraper, fetchEpisodeVideoUrl } from '../../services/scraperManager';
 import { DEFAULT_USER_PREFERENCES, UserPreferences, getUserPreferences } from '../../services/userPreferences';
+import type { AnimeDetail } from '../../types/anime';
+import { getAnimeEpisodeNumbers, getEpisodeByNumber } from '../../utils/episodeUtils';
 
 
 export default function VideoPlayerScreen() {
@@ -23,6 +33,14 @@ export default function VideoPlayerScreen() {
     nextEpisodeNumber?: string;
   }>();
   const router = useRouter();
+  const initialEpisodeNumber = Number(episodeNumber);
+  const initialNextEpisodeNumber = Number(nextEpisodeNumber);
+  const [activeVideoUrl, setActiveVideoUrl] = useState(videoUrl);
+  const [activeEpisodeNumber, setActiveEpisodeNumber] = useState(initialEpisodeNumber);
+  const [activeNextEpisodeNumber, setActiveNextEpisodeNumber] = useState<number | null>(
+    hasNextEpisode === 'true' && Number.isFinite(initialNextEpisodeNumber) ? initialNextEpisodeNumber : null,
+  );
+  const [isLoadingNextEpisode, setIsLoadingNextEpisode] = useState(false);
   const player = useVideoPlayer(videoUrl, (player) => {
     player.muted = false;
     player.volume = 1.0;
@@ -33,14 +51,10 @@ export default function VideoPlayerScreen() {
     player.pause();
   });
   const videoViewRef = useRef<VideoView>(null);
-
-
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [duration, setDuration] = useState(0);
   const [position, setPosition] = useState(0);
-
-
   const [showControls, setShowControls] = useState(true);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const controlsTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,9 +68,15 @@ export default function VideoPlayerScreen() {
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_USER_PREFERENCES);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [trackVersion, setTrackVersion] = useState(0);
-  const autoplayAppliedRef = useRef(false);
-
-
+  const activeVideoUrlRef = useRef(activeVideoUrl);
+  const loadedSourceRef = useRef<string | null>(null);
+  const localAutoplaySourceRef = useRef<string | null>(null);
+  const castTargetRef = useRef<{ session: CastSession; videoUrl: string } | null>(null);
+  const castRequestRef = useRef(0);
+  const nextEpisodeRequestedRef = useRef(false);
+  const animeDetailsRef = useRef<AnimeDetail | null>(null);
+  const animeDetailsRequestRef = useRef<Promise<AnimeDetail | null> | null>(null);
+  const watchedEpisodeWriteRef = useRef<Promise<void>>(Promise.resolve());
   const [sliderValue, setSliderValue] = useState(0);
   const [sliderWidth, setSliderWidth] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
@@ -64,12 +84,9 @@ export default function VideoPlayerScreen() {
   const thumbScale = useRef(new Animated.Value(1)).current;
   const isSeeking = useRef(false);
   const seekStartPosition = useRef(0);
-
-
-  const castClient = useSafeRemoteMediaClient();
   const castSession = useSafeCastSession();
-  const [isCasting, setIsCasting] = useState(false);
-  const castSentRef = useRef(false);
+  const castState = useSafeCastState();
+  const isCasting = castState === 'connected' && Boolean(castSession);
 
   useEffect(() => {
     const loadPreferences = async () => {
@@ -81,9 +98,8 @@ export default function VideoPlayerScreen() {
     void loadPreferences();
   }, []);
 
-
   useEffect(() => {
-    if (isExpoGo || !preferencesReady) return;
+    if (isExpoGo) return;
 
     if (Platform.OS === 'android' && Platform.Version >= 31) {
       const requestCastPermissions = async () => {
@@ -95,76 +111,76 @@ export default function VideoPlayerScreen() {
             PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
           ];
 
-
           if (Platform.OS === 'android' && (Platform.Version as number) >= 33) {
-
             permissions.push(PermissionsAndroid.PERMISSIONS.NEARBY_WIFI_DEVICES);
           }
 
           await PermissionsAndroid.requestMultiple(permissions);
-
-
           try {
-            const CastLib = require('react-native-google-cast');
-            const gcast = CastLib.default || CastLib;
-            if (gcast && gcast.getDiscoveryManager) {
-              const dm = await gcast.getDiscoveryManager();
-              dm.startDiscovery();
-            }
-          } catch (e) {
-            console.warn('[Cast] Discovery start error:', e);
+            await startSafeCastDiscovery();
+          } catch {
+            return;
           }
-        } catch (err) {
-          console.warn('Casting permissions error:', err);
+        } catch {
+          return;
         }
       };
-      requestCastPermissions();
+      void requestCastPermissions();
     }
   }, []);
 
-
   useEffect(() => {
-    if (isExpoGo) return;
+    if (!videoLoaded || !preferencesReady || loadedSourceRef.current !== activeVideoUrl) return;
 
-    if (castClient && videoUrl && !castSentRef.current) {
-      castSentRef.current = true;
-      setIsCasting(true);
+    if (!isExpoGo && (castState === undefined || castState === 'connecting')) {
+      localAutoplaySourceRef.current = null;
+      if (player.playing) player.pause();
+      return;
+    }
 
+    if (!isExpoGo && castState === 'connected') {
+      localAutoplaySourceRef.current = null;
+      if (player.playing) player.pause();
+      if (!castSession) return;
 
-      player.pause();
+      const currentTarget = castTargetRef.current;
+      if (currentTarget?.session === castSession && currentTarget?.videoUrl === activeVideoUrl) return;
 
-      castClient.loadMedia({
+      const requestId = ++castRequestRef.current;
+      const startTime = Math.max(0, player.currentTime || 0);
+      const contentType = /\.m3u8(?:$|\?)/i.test(activeVideoUrl) ? 'application/x-mpegURL' : 'video/mp4';
+      castTargetRef.current = { session: castSession, videoUrl: activeVideoUrl };
+
+      void castSession.client.loadMedia({
         autoplay: preferences.autoplay,
         mediaInfo: {
-          contentUrl: videoUrl,
-          contentType: 'video/mp4',
+          contentUrl: activeVideoUrl,
+          contentType,
           metadata: {
             title: title || 'Anime',
             type: 'movie',
           },
         },
-        startTime: position > 0 ? position : 0,
-      }).catch((err: any) => {
-        console.warn('Failed to load media on Cast device:', err);
-        setIsCasting(false);
-        castSentRef.current = false;
-
-        if (preferences.autoplay) {
-          player.play();
+        startTime,
+      }).catch(async () => {
+        if (castRequestRef.current !== requestId) return;
+        castTargetRef.current = null;
+        try {
+          await endSafeCastSession();
+        } catch {
+          return;
         }
       });
+      return;
     }
 
-
-    if (!castClient && isCasting) {
-      setIsCasting(false);
-      castSentRef.current = false;
-      if (preferences.autoplay) {
-        player.play();
-      }
+    castTargetRef.current = null;
+    castRequestRef.current += 1;
+    if (preferences.autoplay && localAutoplaySourceRef.current !== activeVideoUrl) {
+      localAutoplaySourceRef.current = activeVideoUrl;
+      player.play();
     }
-  }, [castClient, isCasting, player, preferences.autoplay, preferencesReady, title, videoUrl]);
-
+  }, [activeVideoUrl, castSession, castState, player, preferences.autoplay, preferencesReady, title, videoLoaded]);
 
   const resetAutoHideTimer = useCallback(() => {
     if (controlsTimeout.current) {
@@ -224,7 +240,8 @@ export default function VideoPlayerScreen() {
     const statusListener = player.addListener('statusChange', (e) => setIsBuffering(e.status === 'loading'));
     const sourceListener = player.addListener('sourceLoad', (e) => {
       if (e.duration) {
-        autoplayAppliedRef.current = false;
+        loadedSourceRef.current = activeVideoUrlRef.current;
+        nextEpisodeRequestedRef.current = false;
         setDuration(e.duration);
         setVideoLoaded(true);
         setShowControls(true);
@@ -252,13 +269,6 @@ export default function VideoPlayerScreen() {
       return;
     }
 
-    if (!autoplayAppliedRef.current) {
-      autoplayAppliedRef.current = true;
-      if (preferences.autoplay && !isCasting) {
-        player.play();
-      }
-    }
-
     const italianTrack = (track: { language: string; label: string }) => {
       const language = track.language.toLowerCase();
       const label = track.label.toLowerCase();
@@ -277,36 +287,150 @@ export default function VideoPlayerScreen() {
     if (italianSubtitles) {
       player.subtitleTrack = italianSubtitles;
     }
-  }, [isCasting, player, preferences, preferencesReady, trackVersion, videoLoaded]);
+  }, [player, preferences.audioPreference, preferencesReady, trackVersion, videoLoaded]);
+
+  const getAnimeDetails = useCallback(async () => {
+    if (animeDetailsRef.current) return animeDetailsRef.current;
+    if (animeDetailsRequestRef.current) return animeDetailsRequestRef.current;
+    if (!animeUrl) return null;
+
+    const request = fetchAnimeDetailsWithScraper(animeUrl);
+    animeDetailsRequestRef.current = request;
+    try {
+      const details = await request;
+      if (details) animeDetailsRef.current = details;
+      return details;
+    } finally {
+      if (animeDetailsRequestRef.current === request) {
+        animeDetailsRequestRef.current = null;
+      }
+    }
+  }, [animeUrl]);
 
   useEffect(() => {
-    const endListener = player.addListener('playToEnd', () => {
-      const currentEpisode = Number(episodeNumber);
-      const configuredNextEpisode = Number(nextEpisodeNumber);
-      const nextEpisode = Number.isFinite(configuredNextEpisode) ? configuredNextEpisode : currentEpisode + 1;
-      if (
-        !preferences.playNext ||
-        !animeUrl ||
-        !Number.isFinite(currentEpisode) ||
-        (hasNextEpisode !== 'true' && !Number.isFinite(configuredNextEpisode)) ||
-        !Number.isFinite(nextEpisode)
-      ) {
+    let active = true;
+    void getAnimeDetails().then((anime) => {
+      if (!active || !anime || !Number.isFinite(activeEpisodeNumber)) return;
+      const episodeNumbers = getAnimeEpisodeNumbers(anime);
+      const currentIndex = episodeNumbers.indexOf(activeEpisodeNumber);
+      if (currentIndex < 0) return;
+      setActiveNextEpisodeNumber(episodeNumbers[currentIndex + 1] ?? null);
+    }).catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [activeEpisodeNumber, getAnimeDetails]);
+
+  const handleNextEpisode = useCallback(async () => {
+    if (nextEpisodeRequestedRef.current || isLoadingNextEpisode) return;
+    nextEpisodeRequestedRef.current = true;
+    setIsLoadingNextEpisode(true);
+    let sourceChanged = false;
+
+    try {
+      const anime = await getAnimeDetails();
+      if (!anime) return;
+
+      const episodeNumbers = getAnimeEpisodeNumbers(anime);
+      const currentIndex = episodeNumbers.indexOf(activeEpisodeNumber);
+      const nextEpisode = currentIndex >= 0
+        ? episodeNumbers[currentIndex + 1]
+        : activeNextEpisodeNumber ?? undefined;
+      if (nextEpisode === undefined) return;
+
+      const episode = getEpisodeByNumber(anime, nextEpisode);
+      const episodeUrl = episode?.url || (anime.episodeUrl ? `${anime.episodeUrl}${nextEpisode}` : null);
+      if (!episodeUrl) return;
+
+      const nextVideoUrl = await fetchEpisodeVideoUrl(episodeUrl);
+      if (!nextVideoUrl) return;
+
+      const nextIndex = episodeNumbers.indexOf(nextEpisode);
+      const followingEpisode = nextIndex >= 0 ? episodeNumbers[nextIndex + 1] : undefined;
+      const previousVideoUrl = activeVideoUrlRef.current;
+      const previousSourceLoaded = loadedSourceRef.current;
+      const wasPlaying = player.playing;
+
+      player.pause();
+      loadedSourceRef.current = null;
+      localAutoplaySourceRef.current = null;
+      castTargetRef.current = null;
+      castRequestRef.current += 1;
+      activeVideoUrlRef.current = nextVideoUrl;
+      setVideoLoaded(false);
+      setIsBuffering(true);
+      setDuration(0);
+      setPosition(0);
+      setSliderValue(0);
+      setTrackVersion(0);
+
+      try {
+        await player.replaceAsync(nextVideoUrl);
+      } catch {
+        activeVideoUrlRef.current = previousVideoUrl;
+        loadedSourceRef.current = previousSourceLoaded;
+        setVideoLoaded(Boolean(previousSourceLoaded));
+        setIsBuffering(false);
+        if (wasPlaying) player.play();
         return;
       }
 
-      router.replace({
-        pathname: '/anime',
-        params: {
-          url: animeUrl,
-          autoplayEpisode: String(nextEpisode),
-        },
-      });
+      setActiveVideoUrl(nextVideoUrl);
+      setActiveEpisodeNumber(nextEpisode);
+      setActiveNextEpisodeNumber(followingEpisode ?? null);
+      if (!preferences.autoplay || isCasting) player.pause();
+      sourceChanged = true;
+      watchedEpisodeWriteRef.current = watchedEpisodeWriteRef.current
+        .catch(() => undefined)
+        .then(() => addWatchedEpisode(anime, nextEpisode));
+    } finally {
+      if (!sourceChanged) nextEpisodeRequestedRef.current = false;
+      setIsLoadingNextEpisode(false);
+    }
+  }, [activeEpisodeNumber, activeNextEpisodeNumber, getAnimeDetails, isCasting, isLoadingNextEpisode, player, preferences.autoplay]);
+
+  useEffect(() => {
+    if (!isCasting || !castSession) return;
+
+    const client = castSession.client;
+    const updateMediaStatus = (status: MediaStatus | null) => {
+      if (!status) return;
+      setIsPlaying(status.playerState === 'playing');
+      setIsBuffering(status.playerState === 'loading' || status.playerState === 'buffering');
+      if (Number.isFinite(status.streamPosition)) {
+        setPosition(status.streamPosition);
+        if (!isSeeking.current) setSliderValue(status.streamPosition);
+      }
+      const streamDuration = status.mediaInfo?.streamDuration;
+      if (typeof streamDuration === 'number' && Number.isFinite(streamDuration)) {
+        setDuration(streamDuration);
+      }
+    };
+    const statusListener = client.onMediaStatusUpdated(updateMediaStatus);
+    const progressListener = client.onMediaProgressUpdated((currentPosition: number, currentDuration: number) => {
+      setPosition(currentPosition);
+      setDuration(currentDuration);
+      if (!isSeeking.current) setSliderValue(currentPosition);
+    }, 0.5);
+
+    void client.getMediaStatus().then(updateMediaStatus).catch(() => undefined);
+
+    return () => {
+      statusListener.remove();
+      progressListener.remove();
+    };
+  }, [castSession, isCasting]);
+
+  useEffect(() => {
+    const endListener = player.addListener('playToEnd', () => {
+      if (preferences.playNext) void handleNextEpisode();
     });
 
     return () => {
       endListener.remove();
     };
-  }, [animeUrl, episodeNumber, hasNextEpisode, nextEpisodeNumber, player, preferences.playNext, router]);
+  }, [handleNextEpisode, player, preferences.playNext]);
 
 
   useEffect(() => {
@@ -330,7 +454,7 @@ export default function VideoPlayerScreen() {
       duration: preferences.reduceMotion ? 0 : 200,
       useNativeDriver: true,
     }).start();
-  }, [preferences.reduceMotion, showControls]);
+  }, [controlsOpacity, preferences.reduceMotion, showControls]);
 
 
   useEffect(() => {
@@ -347,17 +471,32 @@ export default function VideoPlayerScreen() {
   }, [showControls, isPlaying, videoLoaded, showSettings]);
 
 
+  const returnToAnime = useCallback(async () => {
+    await watchedEpisodeWriteRef.current.catch(() => undefined);
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    router.back();
+  }, [router]);
+
   const handleBack = () => {
     if (isFullscreen) {
       videoViewRef.current?.exitFullscreen();
     } else {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).then(() => {
-        router.back();
-      });
+      void returnToAnime();
     }
   };
 
-  const handlePlayPause = () => {
+  const handlePlayPause = useCallback(() => {
+    if (isCasting && castSession) {
+      const client = castSession.client;
+      void client.getMediaStatus().then((status) => {
+        if (status?.playerState === 'playing') return client.pause();
+        return client.play();
+      }).catch(() => undefined);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      resetAutoHideTimer();
+      return;
+    }
+
     if (player.playing) {
       player.pause();
     } else {
@@ -365,27 +504,37 @@ export default function VideoPlayerScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     resetAutoHideTimer();
-  };
+  }, [castSession, isCasting, player, resetAutoHideTimer]);
 
-  const handleRewind = () => {
-    const newTime = Math.max(0, player.currentTime - 10);
-    player.currentTime = newTime;
+  const handleRewind = useCallback(() => {
+    const currentTime = isCasting ? position : player.currentTime;
+    const newTime = Math.max(0, currentTime - 10);
+    if (isCasting && castSession) {
+      void castSession.client.seek({ position: newTime }).catch(() => undefined);
+    } else {
+      player.currentTime = newTime;
+    }
     setPosition(newTime);
     setSliderValue(newTime);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     resetAutoHideTimer();
-  };
+  }, [castSession, isCasting, player, position, resetAutoHideTimer]);
 
-  const handleForward = () => {
-    const newTime = Math.min(duration, player.currentTime + 10);
-    player.currentTime = newTime;
+  const handleForward = useCallback(() => {
+    const currentTime = isCasting ? position : player.currentTime;
+    const newTime = Math.min(duration, currentTime + 10);
+    if (isCasting && castSession) {
+      void castSession.client.seek({ position: newTime }).catch(() => undefined);
+    } else {
+      player.currentTime = newTime;
+    }
     setPosition(newTime);
     setSliderValue(newTime);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     resetAutoHideTimer();
-  };
+  }, [castSession, duration, isCasting, player, position, resetAutoHideTimer]);
 
-  const toggleControls = () => {
+  const toggleControls = useCallback(() => {
     setShowControls(prev => {
       const next = !prev;
       if (next) {
@@ -396,7 +545,7 @@ export default function VideoPlayerScreen() {
       }
       return next;
     });
-  };
+  }, [resetAutoHideTimer]);
 
   const showSeekFeedback = useCallback((side: 'left' | 'right') => {
     setSeekFeedback(side);
@@ -460,19 +609,23 @@ export default function VideoPlayerScreen() {
   const handleSlidingComplete = (value: number) => {
     isSeeking.current = false;
     setShowPreview(false);
-    player.currentTime = value;
+    if (isCasting && castSession) {
+      void castSession.client.seek({ position: value }).catch(() => undefined);
+    } else {
+      player.currentTime = value;
+    }
     setPosition(value);
     Animated.spring(thumbScale, { toValue: 1, useNativeDriver: true }).start();
     resetAutoHideTimer();
   };
 
-  const handleToggleFullscreen = () => {
+  const handleToggleFullscreen = useCallback(() => {
     if (isFullscreen) {
       videoViewRef.current?.exitFullscreen();
     } else {
       videoViewRef.current?.enterFullscreen();
     }
-  };
+  }, [isFullscreen]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -541,10 +694,7 @@ export default function VideoPlayerScreen() {
         }}
         onFullscreenExit={() => {
           setIsFullscreen(false);
-
-          ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).then(() => {
-            router.back();
-          });
+          void returnToAnime();
         }}
       />
       <View style={styles.tapZones} pointerEvents="box-none">
@@ -569,6 +719,7 @@ export default function VideoPlayerScreen() {
       <VideoPlayerControls
         player={player}
         title={title}
+        episodeNumber={activeEpisodeNumber}
         isPlaying={isPlaying}
         isBuffering={isBuffering}
         position={position}
@@ -585,6 +736,7 @@ export default function VideoPlayerScreen() {
         handleRewind={handleRewind}
         handlePlayPause={handlePlayPause}
         handleForward={handleForward}
+        handleNextEpisode={() => void handleNextEpisode()}
         handleValueChange={handleValueChange}
         handleSlidingStart={handleSlidingStart}
         handleSlidingComplete={handleSlidingComplete}
@@ -597,6 +749,8 @@ export default function VideoPlayerScreen() {
         setPlaybackSpeed={setPlaybackSpeed}
 
         isCasting={isCasting}
+        hasNextEpisode={activeNextEpisodeNumber !== null}
+        isNextEpisodeLoading={isLoadingNextEpisode}
       />
     </View>
   );

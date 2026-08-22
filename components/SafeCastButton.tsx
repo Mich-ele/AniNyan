@@ -1,18 +1,25 @@
 import React from 'react';
 import { ViewStyle, StyleProp } from 'react-native';
 import Constants from 'expo-constants';
-import theme from '../app/styles/theme';
+import type { CastSession } from 'react-native-google-cast';
+import { theme } from '../app/styles/theme';
 
 export const isExpoGo = Constants.appOwnership === 'expo';
 
+type SafeCastState = 'noDevicesAvailable' | 'notConnected' | 'connecting' | 'connected' | null | undefined;
+
 let gcast: any = null;
 let NativeCastButton: any = null;
+let useCastSessionHook: (options?: { ignoreSessionUpdatesInBackground?: boolean }) => CastSession | null = () => null;
+let useCastStateHook: () => SafeCastState = () => null;
 
 if (!isExpoGo) {
   try {
     gcast = require('react-native-google-cast');
     if (gcast) {
       NativeCastButton = gcast.CastButton || (gcast.default && gcast.default.CastButton);
+      useCastSessionHook = gcast.useCastSession || useCastSessionHook;
+      useCastStateHook = gcast.useCastState || useCastStateHook;
     }
   } catch {
     gcast = null;
@@ -20,27 +27,30 @@ if (!isExpoGo) {
   }
 }
 
+export const useSafeCastSession = () => useCastSessionHook({ ignoreSessionUpdatesInBackground: true });
 
-export const useSafeRemoteMediaClient = () => {
-  if (isExpoGo) return null;
-  if (gcast && gcast.useRemoteMediaClient) return gcast.useRemoteMediaClient();
-  if (gcast && gcast.default && gcast.default.useRemoteMediaClient) return gcast.default.useRemoteMediaClient();
-  return null;
+export const useSafeCastState = () => useCastStateHook();
+
+export const startSafeCastDiscovery = async () => {
+  if (isExpoGo || !gcast) return;
+  const CastContext = gcast.default || gcast.CastContext;
+  const discoveryManager = CastContext?.getDiscoveryManager?.();
+  await discoveryManager?.startDiscovery();
 };
 
-export const useSafeCastSession = () => {
-  if (isExpoGo) return null;
-  if (gcast && gcast.useCastSession) return gcast.useCastSession();
-  if (gcast && gcast.default && gcast.default.useCastSession) return gcast.default.useCastSession();
-  return null;
+export const endSafeCastSession = async () => {
+  if (isExpoGo || !gcast) return;
+  const CastContext = gcast.default || gcast.CastContext;
+  const sessionManager = CastContext?.getSessionManager?.();
+  await sessionManager?.endCurrentSession(true);
 };
 
 export const SafeCastButton = ({
-    style,
-    tintColor
+  style,
+  tintColor,
 }: {
-    style?: StyleProp<ViewStyle>,
-    tintColor?: string
+  style?: StyleProp<ViewStyle>;
+  tintColor?: string;
 }) => {
   const color = tintColor || theme.colorPalette.text.primary;
 

@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, FlatList, ActivityIndicator, ImageBackground, TouchableOpacity, StatusBar, Platform, Animated, Linking, PanResponder, GestureResponderEvent, PanResponderGestureState, Dimensions } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { fetchAnimeDetailsWithScraper, fetchEpisodeVideoUrl } from '../services/scraperManager';
 import { getWatchedEpisodes, addWatchedEpisode, removeWatchedEpisode, isAnimeInWatchlist, addToWatchlist, removeFromWatchlist } from '../services/cacheService';
 import { AnimeDetail } from '../types/anime';
@@ -146,6 +146,25 @@ const AnimeDetailScreen = () => {
   const autoScrollIntervalRef = useRef<any>(null);
   const currentScrollYRef = useRef<number>(0);
   const scrollSpeedRef = useRef<number>(0);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    defaultPageSetRef.current = false;
+
+    const refreshWatchedEpisodes = async () => {
+      if (!url) return;
+      const animeId = getAnimeIdFromUrl(url);
+      if (!animeId) return;
+      const watched = await getWatchedEpisodes(animeId);
+      if (!active) return;
+      setWatchedEpisodes(watched);
+      setWatchedLoaded(true);
+    };
+
+    void refreshWatchedEpisodes();
+    return () => {
+      active = false;
+    };
+  }, [url]));
   useEffect(() => {
     const listenerId = scrollY.addListener(({
       value
@@ -160,7 +179,6 @@ const AnimeDetailScreen = () => {
     const loadData = async () => {
       if (url) {
         await loadAnimeDetails();
-        await loadWatchedEpisodes();
         await checkWatchlistStatus();
       }
     };
@@ -228,15 +246,6 @@ const AnimeDetailScreen = () => {
       } finally {
         setLoading(false);
       }
-    }
-  };
-  const loadWatchedEpisodes = async () => {
-    if (!url) return;
-    const animeId = getAnimeIdFromUrl(url);
-    if (animeId) {
-      const watched = await getWatchedEpisodes(animeId);
-      setWatchedEpisodes(watched);
-      setWatchedLoaded(true);
     }
   };
   const handleEpisodePress = async (episodeNumber: number, replaceCurrentRoute = false) => {

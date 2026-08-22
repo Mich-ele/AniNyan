@@ -16,7 +16,7 @@ import { SafeCastButton } from './SafeCastButton';
 
 import VideoPlayerCustomThumb from './VideoPlayerCustomThumb';
 import { VideoPlayer } from 'expo-video';
-import theme from '../app/styles/theme';
+import { theme } from '../app/styles/theme';
 
 const formatTime = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -29,6 +29,7 @@ const formatTime = (seconds: number) => {
 interface VideoPlayerControlsProps {
   player: VideoPlayer;
   title?: string;
+  episodeNumber: number;
   isBuffering: boolean;
   isPlaying: boolean;
   position: number;
@@ -45,6 +46,7 @@ interface VideoPlayerControlsProps {
   handleRewind: () => void;
   handlePlayPause: () => void;
   handleForward: () => void;
+  handleNextEpisode: () => void;
   handleValueChange: (value: number) => void;
   handleSlidingStart: () => void;
   handleSlidingComplete: (value: number) => void;
@@ -55,12 +57,15 @@ interface VideoPlayerControlsProps {
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
   isCasting: boolean;
+  hasNextEpisode: boolean;
+  isNextEpisodeLoading: boolean;
 }
 
 export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) => {
   const {
     player,
     title,
+    episodeNumber,
     isBuffering,
     isPlaying,
     position,
@@ -76,6 +81,7 @@ export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) =
     handleRewind,
     handlePlayPause,
     handleForward,
+    handleNextEpisode,
     handleValueChange,
     handleSlidingStart,
     handleSlidingComplete,
@@ -86,6 +92,8 @@ export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) =
     playbackSpeed,
     setPlaybackSpeed,
     isCasting,
+    hasNextEpisode,
+    isNextEpisodeLoading,
   } = props;
 
   const playbackSpeeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -131,7 +139,7 @@ export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) =
           <View style={styles.titleBlock}>
             <Text style={styles.nowPlayingText}>Stai guardando</Text>
             <Text style={styles.titleText} numberOfLines={1}>{title || 'Anime'}</Text>
-            <Text style={styles.compactTime}>{formatTime(position)} / {formatTime(duration)}</Text>
+            <Text style={styles.episodeText}>Episodio: {episodeNumber}</Text>
           </View>
 
           <View style={styles.topRightControls}>
@@ -145,6 +153,21 @@ export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) =
             <TouchableOpacity onPress={toggleSettings} style={styles.iconButton}>
               <Ionicons name="settings-outline" size={24} color={theme.colorPalette.text.primary} />
             </TouchableOpacity>
+            {hasNextEpisode && (
+              <TouchableOpacity
+                onPress={handleNextEpisode}
+                style={[styles.iconButton, styles.nextEpisodeTopButton]}
+                disabled={!showControls || isNextEpisodeLoading}
+                accessibilityRole="button"
+                accessibilityLabel="Episodio successivo"
+              >
+                {isNextEpisodeLoading ? (
+                  <ActivityIndicator size="small" color={theme.colorPalette.text.primary} />
+                ) : (
+                  <Ionicons name="play-skip-forward" size={24} color={theme.colorPalette.text.primary} />
+                )}
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -283,6 +306,12 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontFamily: theme.typography.fontFamily.primaryBold,
   },
+  episodeText: {
+    color: theme.colorPalette.text.secondary,
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.primaryBold,
+    marginTop: 2,
+  },
   topRightControls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -307,6 +336,8 @@ const styles = StyleSheet.create({
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  nextEpisodeTopButton: {
   },
   centerControls: {
     position: 'absolute',
