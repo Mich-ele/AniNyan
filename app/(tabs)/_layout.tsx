@@ -6,6 +6,9 @@ import Constants from 'expo-constants';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import Animated, {
   Easing,
+  FadeIn,
+  FadeOut,
+  ZoomIn,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -101,10 +104,17 @@ const AnimatedTabBar = ({ state, descriptors, navigation, insets }: BottomTabBar
               onLongPress={onLongPress}
               style={({ pressed }) => [styles.tabItem, pressed && styles.tabItemPressed]}
             >
-              <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+              <Animated.View
+                key={focused ? 'focused' : 'idle'}
+                entering={focused ? ZoomIn.duration(170) : FadeIn.duration(130)}
+                exiting={FadeOut.duration(90)}
+                style={[styles.iconContainer, focused && styles.iconContainerActive]}
+              >
                 {options.tabBarIcon?.({ focused, color, size: 23 })}
-                {focused && <View style={styles.activeIndicator} />}
-              </View>
+                {focused && (
+                  <Animated.View entering={FadeIn.duration(150)} style={styles.activeIndicator} />
+                )}
+              </Animated.View>
             </Pressable>
           );
         })}

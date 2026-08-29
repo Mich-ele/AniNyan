@@ -1,12 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type AudioPreference = 'subtitles' | 'dubbed';
+export type AnimeProvider = 'animeworld' | 'animeunity';
 
 export type UserPreferences = {
   autoplay: boolean;
   playNext: boolean;
   audioPreference: AudioPreference;
   reduceMotion: boolean;
+  animeProvider: AnimeProvider;
 };
 
 const PREFERENCES_KEY = 'user_preferences';
@@ -16,21 +18,26 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   playNext: true,
   audioPreference: 'subtitles',
   reduceMotion: false,
+  animeProvider: 'animeunity',
 };
 
 export const getUserPreferences = async (): Promise<UserPreferences> => {
   try {
     const stored = await AsyncStorage.getItem(PREFERENCES_KEY);
     if (!stored) {
-      return DEFAULT_USER_PREFERENCES;
+      const initialPreferences = { ...DEFAULT_USER_PREFERENCES };
+      await AsyncStorage.setItem(PREFERENCES_KEY, JSON.stringify(initialPreferences));
+      return initialPreferences;
     }
 
+    const parsed = JSON.parse(stored) as Partial<UserPreferences>;
     return {
       ...DEFAULT_USER_PREFERENCES,
-      ...JSON.parse(stored),
+      ...parsed,
+      animeProvider: parsed.animeProvider === 'animeworld' ? 'animeworld' : 'animeunity',
     };
   } catch {
-    return DEFAULT_USER_PREFERENCES;
+    return { ...DEFAULT_USER_PREFERENCES };
   }
 };
 

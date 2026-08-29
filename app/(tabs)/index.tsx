@@ -13,6 +13,7 @@ import { getContinueWatchingList, removeWatchedEpisode, getWatchedEpisodes } fro
 import { Anime, CarouselItem } from '../../types/anime';
 import { PremiumAnimeCard } from '../../components/PremiumAnimeCard';
 import { useHideTabBarOnScroll } from '../../hooks/useTabBarVisibility';
+import { AnimeProvider, getUserPreferences } from '../../services/userPreferences';
 const {
   width,
   height: screenHeight
@@ -269,6 +270,7 @@ class HomeErrorBoundary extends React.Component<{
   }
 }
 let sessionCache: {
+  provider?: AnimeProvider;
   continueWatching?: {
     anime: Anime;
     nextEpisode: number;
@@ -292,6 +294,7 @@ const ContentSection = React.memo(({
   setActiveHeroIndex,
   topAnimeFilter,
   setTopAnimeFilter,
+  activeProvider,
   handleCarouselPress,
   handleRemoveFromContinueWatching,
   handleAnimePress
@@ -338,7 +341,9 @@ const ContentSection = React.memo(({
               <View style={styles.topAnimeTabs}>
                 {(['day', 'week', 'month'] as const).map(period => <TouchableOpacity key={period} style={[styles.topAnimeTab, topAnimeFilter === period && styles.topAnimeTabActive]} onPress={() => setTopAnimeFilter(period)}>
                     <Text style={[styles.topAnimeTabText, topAnimeFilter === period && styles.topAnimeTabTextActive]}>
-                      {period === 'day' ? 'Giorno' : period === 'week' ? 'Settimana' : 'Mese'}
+                      {activeProvider === 'animeunity'
+                        ? period === 'day' ? 'Popolari' : period === 'week' ? 'Più visti' : 'Voto'
+                        : period === 'day' ? 'Giorno' : period === 'week' ? 'Settimana' : 'Mese'}
                     </Text>
                   </TouchableOpacity>)}
               </View>
@@ -379,6 +384,7 @@ function HomeScreenInner() {
     month: Anime[];
   } | null>(null);
   const [topAnimeFilter, setTopAnimeFilter] = useState<'day' | 'week' | 'month'>('month');
+  const [activeProvider, setActiveProvider] = useState<AnimeProvider>('animeunity');
   const [continueWatching, setContinueWatching] = useState<{
     anime: Anime;
     nextEpisode: number;
@@ -388,7 +394,8 @@ function HomeScreenInner() {
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const carouselRef = useRef<FlatList>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const applyAnimeWorldSections = useCallback((sections: any) => {
+  const providerRef = useRef<AnimeProvider | null>(sessionCache.provider || null);
+  const applyProviderSections = useCallback((sections: any) => {
     const carousel = sections.carousel || [];
     const newItems = sections.newAdditions || [];
     const randomItems = sections.randomAnime || [];
@@ -428,7 +435,7 @@ function HomeScreenInner() {
       descriptionFull: extendedAnime.description
     };
   }) : carouselData;
-  const safeFetch = async <T,>(fetcher: () => Promise<T>, cacheKey: keyof typeof sessionCache, fallback: T): Promise<T> => {
+  const safeFetch = useCallback(async <T,>(fetcher: () => Promise<T>, cacheKey: keyof typeof sessionCache, fallback: T): Promise<T> => {
     try {
       const result = await fetcher();
       (sessionCache as any)[cacheKey] = result;
@@ -437,9 +444,24 @@ function HomeScreenInner() {
       console.warn(`Failed to fetch ${cacheKey}, using cached data:`, error);
       return (sessionCache as any)[cacheKey] as T ?? fallback;
     }
-  };
-  const fetchFreshData = async () => {
+  }, []);
+  const fetchFreshData = useCallback(async () => {
     try {
+      const provider = (await getUserPreferences()).animeProvider;
+      setActiveProvider(provider);
+      if (providerRef.current !== provider) {
+        providerRef.current = provider;
+        sessionCache = {
+          provider,
+          continueWatching: sessionCache.continueWatching,
+        };
+        setNewAdditions([]);
+        setRandomAnime([]);
+        setLatestEpisodes([]);
+        setCarouselData([]);
+        setTopAnime(null);
+        setActiveHeroIndex(0);
+      }
       const [watched, sections, latest] = await Promise.all([safeFetch(() => getContinueWatchingList(), 'continueWatching', []), safeFetch(() => fetchHomePageSections(), 'newAdditions', null), safeFetch(() => fetchLatestEpisodes(), 'latestEpisodes', [])]);
       setContinueWatching(watched as {
         anime: Anime;
@@ -447,7 +469,7 @@ function HomeScreenInner() {
       }[]);
       if (sections && typeof sections === 'object' && 'newAdditions' in (sections as any)) {
         const s = sections as any;
-        applyAnimeWorldSections(s);
+        applyProviderSections(s);
       } else {
         setNewAdditions(sessionCache.newAdditions || []);
         setRandomAnime(sessionCache.randomAnime || []);
@@ -464,7 +486,7 @@ function HomeScreenInner() {
       setCarouselData(sessionCache.carouselData || []);
       setTopAnime(sessionCache.topAnime || null);
     }
-  };
+  }, [applyProviderSections, safeFetch]);
   const loadData = useCallback(async (forceRefresh = false) => {
     if (forceRefresh) {
       setRefreshing(true);
@@ -479,7 +501,7 @@ function HomeScreenInner() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [fetchFreshData]);
   const refreshContinueWatching = useCallback(async () => {
     try {
       const watched = await getContinueWatchingList();
@@ -490,8 +512,21 @@ function HomeScreenInner() {
     }
   }, []);
   useFocusEffect(useCallback(() => {
-    refreshContinueWatching();
-  }, [refreshContinueWatching]));
+    let active = true;
+    const refreshFocusedScreen = async () => {
+      const provider = (await getUserPreferences()).animeProvider;
+      if (!active) return;
+      if (providerRef.current !== provider) {
+        await loadData(true);
+        return;
+      }
+      await refreshContinueWatching();
+    };
+    void refreshFocusedScreen();
+    return () => {
+      active = false;
+    };
+  }, [loadData, refreshContinueWatching]));
   useEffect(() => {
     const unsub = navigation.addListener('tabPress', () => {
       refreshContinueWatching();
@@ -525,7 +560,7 @@ function HomeScreenInner() {
       mounted = false;
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
-  }, []);
+  }, [fetchFreshData]);
   useEffect(() => {
     const sections: any[] = [];
     if (continueWatching.length > 0) {
@@ -559,28 +594,45 @@ function HomeScreenInner() {
         });
       }
     }
-    if (newAdditions.length > 0) {
-      sections.push({
-        type: 'topPicks',
-        title: 'Ultimi Episodi',
-        data: newAdditions
-      });
-    } else if (latestEpisodes.length > 0) {
-      sections.push({
-        type: 'topPicks',
-        title: 'Ultimi Episodi',
-        data: latestEpisodes
-      });
-    }
-    if (randomAnime.length > 0) {
-      sections.push({
-        type: 'randomAnime',
-        title: 'In Corso',
-        data: randomAnime
-      });
+    if (activeProvider === 'animeunity') {
+      if (latestEpisodes.length > 0) {
+        sections.push({
+          type: 'topPicks',
+          title: 'Ultimi Episodi',
+          data: latestEpisodes
+        });
+      }
+      if (newAdditions.length > 0) {
+        sections.push({
+          type: 'randomAnime',
+          title: 'Ultime aggiunte',
+          data: newAdditions
+        });
+      }
+    } else {
+      if (newAdditions.length > 0) {
+        sections.push({
+          type: 'topPicks',
+          title: 'Ultimi Episodi',
+          data: newAdditions
+        });
+      } else if (latestEpisodes.length > 0) {
+        sections.push({
+          type: 'topPicks',
+          title: 'Ultimi Episodi',
+          data: latestEpisodes
+        });
+      }
+      if (randomAnime.length > 0) {
+        sections.push({
+          type: 'randomAnime',
+          title: 'In Corso',
+          data: randomAnime
+        });
+      }
     }
     setContentSections(sections);
-  }, [continueWatching, carouselData, newAdditions, randomAnime, topAnime, topAnimeFilter, latestEpisodes]);
+  }, [activeProvider, continueWatching, carouselData, newAdditions, randomAnime, topAnime, topAnimeFilter, latestEpisodes]);
   const handleAnimePress = (anime: Anime) => {
     router.push({
       pathname: '/anime',
@@ -617,7 +669,7 @@ function HomeScreenInner() {
   }: {
     item: any;
     index: number;
-  }) => <ContentSection item={item} index={index} heroCarousel={heroCarousel} carouselRef={carouselRef} activeHeroIndex={activeHeroIndex} setActiveHeroIndex={setActiveHeroIndex} topAnimeFilter={topAnimeFilter} setTopAnimeFilter={setTopAnimeFilter} handleCarouselPress={handleCarouselPress} handleRemoveFromContinueWatching={handleRemoveFromContinueWatching} handleAnimePress={handleAnimePress} />;
+  }) => <ContentSection item={item} index={index} heroCarousel={heroCarousel} carouselRef={carouselRef} activeHeroIndex={activeHeroIndex} setActiveHeroIndex={setActiveHeroIndex} topAnimeFilter={topAnimeFilter} setTopAnimeFilter={setTopAnimeFilter} activeProvider={activeProvider} handleCarouselPress={handleCarouselPress} handleRemoveFromContinueWatching={handleRemoveFromContinueWatching} handleAnimePress={handleAnimePress} />;
   return <View style={styles.container}>
       <LinearGradient colors={[theme.colorPalette.primary.background, theme.colorPalette.primary.background]} style={styles.gradientBackground}>
         <SafeAreaView style={styles.safeArea} edges={['top']}>

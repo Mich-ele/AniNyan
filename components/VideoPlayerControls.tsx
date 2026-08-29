@@ -7,11 +7,17 @@ import {
   Animated,
   ActivityIndicator,
   TouchableWithoutFeedback,
-  ScrollView,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import Reanimated, {
+  FadeIn,
+  FadeOut,
+  SlideInRight,
+  SlideOutRight,
+  ZoomIn,
+} from 'react-native-reanimated';
 import { SafeCastButton } from './SafeCastButton';
 
 import VideoPlayerCustomThumb from './VideoPlayerCustomThumb';
@@ -59,7 +65,46 @@ interface VideoPlayerControlsProps {
   isCasting: boolean;
   hasNextEpisode: boolean;
   isNextEpisodeLoading: boolean;
+  reduceMotion: boolean;
 }
+
+type AnimatedControlButtonProps = React.ComponentProps<typeof TouchableOpacity> & {
+  reduceMotion: boolean;
+};
+
+const AnimatedControlButton = ({
+  reduceMotion,
+  children,
+  disabled,
+  ...props
+}: AnimatedControlButtonProps) => {
+  const scale = React.useRef(new Animated.Value(1)).current;
+
+  const animateScale = (value: number) => {
+    if (reduceMotion) return;
+    Animated.spring(scale, {
+      toValue: value,
+      damping: 16,
+      stiffness: 260,
+      mass: 0.55,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <TouchableOpacity
+        {...props}
+        disabled={disabled}
+        activeOpacity={0.86}
+        onPressIn={() => animateScale(0.91)}
+        onPressOut={() => animateScale(1)}
+      >
+        {children}
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
 
 export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) => {
   const {
@@ -94,11 +139,26 @@ export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) =
     isCasting,
     hasNextEpisode,
     isNextEpisodeLoading,
+    reduceMotion,
   } = props;
 
   const playbackSpeeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
   const remaining = Math.max(0, duration - position);
   const previewLabel = showPreview ? formatTime(previewTime) : formatTime(position);
+  const topTranslateY = controlsOpacity.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-12, 0],
+  });
+  const centerScale = controlsOpacity.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.94, 1],
+  });
+  const bottomTranslateY = controlsOpacity.interpolate({
+    inputRange: [0, 1],
+    outputRange: [14, 0],
+  });
+  const instantEnter = FadeIn.duration(0);
+  const instantExit = FadeOut.duration(0);
 
   const handleMainPress = () => {
     if (showSettings) {
@@ -126,15 +186,25 @@ export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) =
         />
 
         {isBuffering && (
-          <View pointerEvents="none" style={styles.bufferingLayer}>
-            <ActivityIndicator size="large" color={theme.colorPalette.accent.primary} />
-          </View>
+          <Reanimated.View
+            entering={reduceMotion ? instantEnter : FadeIn.duration(160)}
+            exiting={reduceMotion ? instantExit : FadeOut.duration(120)}
+            pointerEvents="none"
+            style={styles.bufferingLayer}
+          >
+            <View style={styles.bufferingIndicator}>
+              <ActivityIndicator size="large" color={theme.colorPalette.accent.primary} />
+            </View>
+          </Reanimated.View>
         )}
 
-        <View style={styles.topControls} pointerEvents={showControls ? 'auto' : 'none'}>
-          <TouchableOpacity onPress={handleBack} style={styles.iconButton}>
+        <Animated.View
+          style={[styles.topControls, { transform: [{ translateY: topTranslateY }] }]}
+          pointerEvents={showControls ? 'auto' : 'none'}
+        >
+          <AnimatedControlButton reduceMotion={reduceMotion} onPress={handleBack} style={styles.iconButton}>
             <Ionicons name="arrow-back" size={28} color={theme.colorPalette.text.primary} />
-          </TouchableOpacity>
+          </AnimatedControlButton>
 
           <View style={styles.titleBlock}>
             <Text style={styles.nowPlayingText}>Stai guardando</Text>
@@ -150,13 +220,22 @@ export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) =
               </View>
             )}
             <SafeCastButton style={styles.castButton} tintColor={theme.colorPalette.text.primary} />
-            <TouchableOpacity onPress={toggleSettings} style={styles.iconButton}>
-              <Ionicons name="settings-outline" size={24} color={theme.colorPalette.text.primary} />
-            </TouchableOpacity>
+            <AnimatedControlButton
+              reduceMotion={reduceMotion}
+              onPress={toggleSettings}
+              style={[styles.iconButton, showSettings && styles.iconButtonActive]}
+            >
+              <Ionicons
+                name="settings-outline"
+                size={24}
+                color={showSettings ? theme.colorPalette.accent.primary : theme.colorPalette.text.primary}
+              />
+            </AnimatedControlButton>
             {hasNextEpisode && (
-              <TouchableOpacity
+              <AnimatedControlButton
+                reduceMotion={reduceMotion}
                 onPress={handleNextEpisode}
-                style={[styles.iconButton, styles.nextEpisodeTopButton]}
+                style={styles.iconButton}
                 disabled={!showControls || isNextEpisodeLoading}
                 accessibilityRole="button"
                 accessibilityLabel="Episodio successivo"
@@ -166,36 +245,57 @@ export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) =
                 ) : (
                   <Ionicons name="play-skip-forward" size={24} color={theme.colorPalette.text.primary} />
                 )}
-              </TouchableOpacity>
+              </AnimatedControlButton>
             )}
           </View>
-        </View>
+        </Animated.View>
 
-        <View style={styles.centerControls} pointerEvents={showControls ? 'auto' : 'none'}>
-          <TouchableOpacity onPress={handleRewind} style={styles.skipButton} disabled={!showControls}>
+        <Animated.View
+          style={[styles.centerControls, { transform: [{ scale: centerScale }] }]}
+          pointerEvents={showControls ? 'auto' : 'none'}
+        >
+          <AnimatedControlButton
+            reduceMotion={reduceMotion}
+            onPress={handleRewind}
+            style={styles.skipButton}
+            disabled={!showControls}
+          >
             <MaterialCommunityIcons name="rewind-10" size={42} color={theme.colorPalette.text.primary} />
-          </TouchableOpacity>
+          </AnimatedControlButton>
 
-          <TouchableOpacity
+          <AnimatedControlButton
+            reduceMotion={reduceMotion}
             onPress={handlePlayPause}
             style={styles.playButton}
             disabled={!showControls}
-            activeOpacity={0.84}
           >
-            <Ionicons
-              name={isPlaying ? 'pause' : 'play'}
-              size={46}
-              color={theme.colorPalette.primary.background}
-              style={!isPlaying && styles.playIconOffset}
-            />
-          </TouchableOpacity>
+            <Reanimated.View
+              key={isPlaying ? 'pause' : 'play'}
+              entering={reduceMotion ? instantEnter : ZoomIn.duration(140)}
+            >
+              <Ionicons
+                name={isPlaying ? 'pause' : 'play'}
+                size={46}
+                color={theme.colorPalette.primary.background}
+                style={!isPlaying && styles.playIconOffset}
+              />
+            </Reanimated.View>
+          </AnimatedControlButton>
 
-          <TouchableOpacity onPress={handleForward} style={styles.skipButton} disabled={!showControls}>
+          <AnimatedControlButton
+            reduceMotion={reduceMotion}
+            onPress={handleForward}
+            style={styles.skipButton}
+            disabled={!showControls}
+          >
             <MaterialCommunityIcons name="fast-forward-10" size={42} color={theme.colorPalette.text.primary} />
-          </TouchableOpacity>
-        </View>
+          </AnimatedControlButton>
+        </Animated.View>
 
-        <View style={styles.bottomControls} pointerEvents={showControls ? 'auto' : 'none'}>
+        <Animated.View
+          style={[styles.bottomControls, { transform: [{ translateY: bottomTranslateY }] }]}
+          pointerEvents={showControls ? 'auto' : 'none'}
+        >
           <View style={styles.progressHeader}>
             <Text style={styles.progressTime}>{previewLabel}</Text>
             <Text style={styles.remainingText}>-{formatTime(remaining)}</Text>
@@ -225,36 +325,81 @@ export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) =
               />
             )}
           </View>
-        </View>
+        </Animated.View>
 
         {showSettings && (
-          <View style={styles.settingsMenu} pointerEvents="auto">
-            <Text style={styles.settingsTitle}>Velocita riproduzione</Text>
-            <ScrollView
-              style={styles.settingsScroll}
-              contentContainerStyle={styles.settingsScrollContent}
-              showsVerticalScrollIndicator={false}
+          <>
+            <Reanimated.View
+              entering={reduceMotion ? instantEnter : FadeIn.duration(150)}
+              exiting={reduceMotion ? instantExit : FadeOut.duration(110)}
+              pointerEvents="none"
+              style={styles.settingsScrim}
+            />
+            <Reanimated.View
+              entering={reduceMotion ? instantEnter : SlideInRight.duration(220)}
+              exiting={reduceMotion ? instantExit : SlideOutRight.duration(160)}
+              style={styles.settingsMenu}
+              pointerEvents="auto"
             >
-              {playbackSpeeds.map((speed) => (
+              <View style={styles.settingsHeader}>
+                <View style={styles.settingsHeaderIcon}>
+                  <Ionicons name="options-outline" size={21} color={theme.colorPalette.accent.primary} />
+                </View>
+                <View style={styles.settingsHeaderCopy}>
+                  <Text style={styles.settingsEyebrow}>PLAYER</Text>
+                  <Text style={styles.settingsHeading}>Impostazioni</Text>
+                </View>
                 <TouchableOpacity
-                  key={speed}
-                  style={styles.speedOption}
-                  onPress={() => {
-                    player.playbackRate = speed;
-                    setPlaybackSpeed(speed);
-                  }}
+                  onPress={toggleSettings}
+                  style={styles.settingsCloseButton}
+                  activeOpacity={0.76}
+                  accessibilityRole="button"
+                  accessibilityLabel="Chiudi impostazioni"
                 >
-                  <View style={[styles.speedDot, playbackSpeed === speed && styles.speedDotActive]} />
-                  <Text style={[styles.speedText, playbackSpeed === speed && styles.activeSpeedText]}>
-                    {speed === 1 ? 'Normale' : `${speed}x`}
-                  </Text>
-                  {playbackSpeed === speed && (
-                    <Ionicons name="checkmark" size={18} color={theme.colorPalette.accent.primary} />
-                  )}
+                  <Ionicons name="close" size={20} color={theme.colorPalette.text.secondary} />
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+              </View>
+
+              <View style={styles.currentSetting}>
+                <View>
+                  <Text style={styles.currentSettingLabel}>Velocità di riproduzione</Text>
+                </View>
+                <View style={styles.currentSpeedPill}>
+                  <Text style={styles.currentSpeedText}>
+                    {playbackSpeed === 1 ? '1×' : `${playbackSpeed}×`}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.speedGrid}>
+                {playbackSpeeds.map((speed) => {
+                  const isActive = playbackSpeed === speed;
+                  return (
+                    <TouchableOpacity
+                      key={speed}
+                      style={[styles.speedOption, isActive && styles.speedOptionActive]}
+                      activeOpacity={0.78}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isActive }}
+                      onPress={() => {
+                        player.playbackRate = speed;
+                        setPlaybackSpeed(speed);
+                      }}
+                    >
+                      <Text style={[styles.speedText, isActive && styles.activeSpeedText]}>
+                        {speed === 1 ? 'Normale' : `${speed}×`}
+                      </Text>
+                      {isActive && (
+                        <Reanimated.View entering={reduceMotion ? instantEnter : ZoomIn.duration(120)}>
+                          <Ionicons name="checkmark-circle" size={17} color={theme.colorPalette.primary.background} />
+                        </Reanimated.View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </Reanimated.View>
+          </>
         )}
       </Animated.View>
     </View>
@@ -276,6 +421,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  bufferingIndicator: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(8,8,8,0.78)',
+  },
   topControls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -287,7 +440,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 24,
-    backgroundColor: 'rgba(0,0,0,0.28)',
+    backgroundColor: 'rgba(18,18,18,0.64)',
+  },
+  iconButtonActive: {
+    backgroundColor: 'rgba(244,117,33,0.16)',
   },
   titleBlock: {
     flex: 1,
@@ -337,8 +493,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  nextEpisodeTopButton: {
-  },
   centerControls: {
     position: 'absolute',
     left: 0,
@@ -356,8 +510,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
   },
   playButton: {
     width: 92,
@@ -403,66 +555,121 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 28,
   },
-  compactTime: {
-    color: theme.colorPalette.text.secondary,
-    fontSize: 13,
-    fontFamily: theme.typography.fontFamily.primary,
-    marginHorizontal: 8,
-    marginTop: 2,
+  settingsScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.28)',
   },
   settingsMenu: {
     position: 'absolute',
     right: 26,
-    top: 64,
-    bottom: 76,
-    backgroundColor: 'rgba(12,12,12,0.96)',
-    borderRadius: 8,
-    paddingTop: 10,
-    paddingBottom: 8,
-    width: 220,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    overflow: 'hidden',
+    top: 74,
+    width: 344,
+    borderRadius: 16,
+    padding: 18,
+    backgroundColor: 'rgba(15,15,16,0.98)',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.48,
+    shadowRadius: 28,
+    elevation: 18,
   },
-  settingsTitle: {
-    color: theme.colorPalette.text.tertiary,
-    fontSize: 12,
-    fontFamily: theme.typography.fontFamily.primaryBold,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  settingsScroll: {
-    flex: 1,
-  },
-  settingsScrollContent: {
-    paddingBottom: 4,
-  },
-  speedOption: {
-    minHeight: 42,
+  settingsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    gap: 10,
+    marginBottom: 18,
   },
-  speedDot: {
-    width: 5,
-    height: 22,
-    borderRadius: 3,
-    backgroundColor: 'transparent',
+  settingsHeaderIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(244,117,33,0.14)',
   },
-  speedDotActive: {
+  settingsHeaderCopy: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  settingsEyebrow: {
+    color: theme.colorPalette.text.tertiary,
+    fontSize: 10,
+    fontFamily: theme.typography.fontFamily.primaryBold,
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  settingsHeading: {
+    color: theme.colorPalette.text.primary,
+    fontSize: 18,
+    fontFamily: theme.typography.fontFamily.primaryBold,
+  },
+  settingsCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colorPalette.primary.backgroundTertiary,
+  },
+  currentSetting: {
+    minHeight: 58,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: theme.colorPalette.primary.backgroundTertiary,
+    marginBottom: 12,
+  },
+  currentSettingLabel: {
+    color: theme.colorPalette.text.primary,
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.primaryBold,
+  },
+  currentSettingHint: {
+    color: theme.colorPalette.text.tertiary,
+    fontSize: 11,
+    fontFamily: theme.typography.fontFamily.primary,
+    marginTop: 2,
+  },
+  currentSpeedPill: {
+    minWidth: 46,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(244,117,33,0.14)',
+  },
+  currentSpeedText: {
+    color: theme.colorPalette.accent.primary,
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.primaryBold,
+  },
+  speedGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  speedOption: {
+    width: '31.5%',
+    height: 42,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    gap: 5,
+    backgroundColor: theme.colorPalette.primary.backgroundTertiary,
+  },
+  speedOptionActive: {
     backgroundColor: theme.colorPalette.accent.primary,
   },
   speedText: {
-    flex: 1,
-    color: theme.colorPalette.text.primary,
-    fontSize: 14,
+    color: theme.colorPalette.text.secondary,
+    fontSize: 13,
     fontFamily: theme.typography.fontFamily.primary,
   },
   activeSpeedText: {
-    color: theme.colorPalette.accent.primary,
+    color: theme.colorPalette.primary.background,
     fontFamily: theme.typography.fontFamily.primaryBold,
   },
 });

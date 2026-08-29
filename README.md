@@ -8,10 +8,10 @@ AniNyan è un'app mobile per guardare, scoprire e tenere traccia degli anime, re
 
 ## Funzionalità
 
-- Catalogo, ricerca e filtri avanzati tramite AnimeWorld
+- Catalogo, ricerca e filtri avanzati tramite AnimeWorld e AnimeUnity
 - Watchlist locale e cronologia degli episodi visualizzati
 - Riproduzione video con supporto a Cast e autoplay dell'episodio successivo
-- Preferenze per autoplay, lingua audio e riduzione del movimento
+- Selezione della sorgente e preferenze per autoplay, lingua audio e riduzione del movimento
 - Pressione prolungata su un anime per aggiungerlo o rimuoverlo rapidamente dalla watchlist
 
 ## Compilazione / Debug

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Anime, AnimeDetail } from '../types/anime';
 import { getAnimeEpisodeNumbers } from '../utils/episodeUtils';
+import { getAnimeSourceFromUrl } from '../utils/utils';
 const WATCHED_EPISODES_PREFIX = 'watched_episodes_';
 const ANIME_DETAILS_PREFIX = 'anime_details_';
 const WATCHLIST_PREFIX = 'watchlist_';
@@ -99,7 +100,10 @@ export const isAnimeInWatchlist = async (animeId: string): Promise<boolean> => {
 };
 export const addToWatchlist = async (anime: AnimeDetail): Promise<void> => {
   try {
-    const jsonValue = JSON.stringify(anime);
+    const jsonValue = JSON.stringify({
+      ...anime,
+      source: anime.source ?? getAnimeSourceFromUrl(anime.url),
+    });
     await AsyncStorage.setItem(`${WATCHLIST_PREFIX}${anime.id}`, jsonValue);
   } catch (e) {
     console.error('Failed to add to watchlist.', e);
@@ -116,7 +120,14 @@ export const getWatchlist = async (): Promise<AnimeDetail[]> => {
   try {
     const watchlistKeys = await getKeysWithPrefix(WATCHLIST_PREFIX);
     const watchlistItems = await AsyncStorage.multiGet(watchlistKeys);
-    const watchlist = watchlistItems.map(([key, value]) => JSON.parse(value!));
+    const watchlist = watchlistItems.flatMap(([, value]) => {
+      if (!value) return [];
+      const anime = JSON.parse(value) as AnimeDetail;
+      return [{
+        ...anime,
+        source: anime.source ?? getAnimeSourceFromUrl(anime.url),
+      }];
+    });
     return watchlist.sort((a, b) => a.title.localeCompare(b.title));
   } catch (e) {
     console.error('Failed to fetch watchlist.', e);

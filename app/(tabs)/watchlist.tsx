@@ -8,6 +8,7 @@ import { theme } from '../styles/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { PremiumAnimeCard } from '../../components/PremiumAnimeCard';
 import { useHideTabBarOnScroll } from '../../hooks/useTabBarVisibility';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 const { width } = Dimensions.get('window');
 const numColumns = 2;
@@ -21,7 +22,7 @@ const EnhancedAnimeCard = ({ anime, onPress, onWatchlistChange, index = 0 }: { a
     onPress={onPress}
     index={index}
     width={cardWidth}
-    badge="In lista"
+    badge={anime.source === 'animeunity' ? 'AnimeUnity' : 'AnimeWorld'}
     initialWatchlisted
     onWatchlistChange={onWatchlistChange}
     style={styles.enhancedAnimeCard}
@@ -64,7 +65,7 @@ const WatchlistScreen = () => {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-          <View style={styles.header}>
+          <Animated.View entering={FadeInDown.duration(240)} style={styles.header}>
             <Text style={styles.eyebrow}>Salvati</Text>
             <View style={styles.titleRow}>
               <Text style={styles.title}>La mia Lista</Text>
@@ -79,10 +80,10 @@ const WatchlistScreen = () => {
                 ? `${watchlist.length} titoli salvati per dopo`
                 : 'Conserva qui gli anime che vuoi guardare'}
             </Text>
-          </View>
+          </Animated.View>
 
           {watchlist.length === 0 ? (
-            <View style={styles.emptyContainer}>
+            <Animated.View entering={FadeIn.duration(220)} style={styles.emptyContainer}>
               <View style={styles.emptyIcon}>
                 <Ionicons name="heart-outline" size={34} color={theme.colorPalette.accent.primary} />
               </View>
@@ -92,7 +93,7 @@ const WatchlistScreen = () => {
                 <Ionicons name="search" size={16} color="#ffffff" style={styles.browseButtonIcon} />
                 <Text style={styles.browseButtonText}>Esplora Anime</Text>
               </TouchableOpacity>
-            </View>
+            </Animated.View>
           ) : (
             <FlatList
               data={watchlist}

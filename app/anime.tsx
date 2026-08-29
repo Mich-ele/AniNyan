@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, FlatList, ActivityIndicator, ImageB
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { fetchAnimeDetailsWithScraper, fetchEpisodeVideoUrl } from '../services/scraperManager';
 import { getWatchedEpisodes, addWatchedEpisode, removeWatchedEpisode, isAnimeInWatchlist, addToWatchlist, removeFromWatchlist } from '../services/cacheService';
-import { AnimeDetail } from '../types/anime';
+import { Anime, AnimeDetail } from '../types/anime';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { getAnimeIdFromUrl } from '../utils/utils';
@@ -106,6 +106,25 @@ const EpisodeButton: React.FC<EpisodeButtonProps> = ({
         </TouchableOpacity>}
     </View>;
 };
+const RelatedAnimeCard = ({ anime, onPress }: { anime: Anime; onPress: () => void }) => (
+  <TouchableOpacity style={styles.relatedCard} onPress={onPress} activeOpacity={0.82}>
+    <ImageBackground
+      source={{ uri: anime.image }}
+      style={styles.relatedImage}
+      imageStyle={styles.relatedImageStyle}
+    >
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.92)']}
+        style={styles.relatedGradient}
+      >
+        <Text style={styles.relatedTitle} numberOfLines={2}>{anime.title}</Text>
+        {anime.subtitle && (
+          <Text style={styles.relatedSubtitle} numberOfLines={1}>{anime.subtitle}</Text>
+        )}
+      </LinearGradient>
+    </ImageBackground>
+  </TouchableOpacity>
+);
 const AnimeDetailScreen = () => {
   const {
     url,
@@ -380,7 +399,8 @@ const AnimeDetailScreen = () => {
       </View>;
   }
   const episodeNumbers = getAnimeEpisodeNumbers(anime);
-  const totalEpisodes = episodeNumbers.length;
+  const listedEpisodes = episodeNumbers.length;
+  const totalEpisodes = Math.max(listedEpisodes, anime.existEpisodes || 0);
   const pageStart = (currentPage - 1) * PAGE_SIZE;
   const pageEpisodeNumbers = episodeNumbers.slice(pageStart, pageStart + PAGE_SIZE);
   const visibleEpisodeNumbers = pageEpisodeNumbers;
@@ -573,38 +593,67 @@ const AnimeDetailScreen = () => {
             </Text>
           </TouchableOpacity>
 
+          {anime.genres.length > 0 && <View style={styles.genresSection}>
+              <Text style={styles.infoLabel}>Generi</Text>
+              <View style={styles.genreChips}>
+                {anime.genres.map(genre => <View key={genre} style={styles.genreChip}>
+                    <Text style={styles.genreChipText}>{genre}</Text>
+                  </View>)}
+              </View>
+            </View>}
+
           <View style={styles.infoGrid}>
+            {anime.category && <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Tipo</Text>
+                <Text style={styles.infoValue}>{anime.category}</Text>
+              </View>}
+            {totalEpisodes > 0 && <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Episodi</Text>
+                <Text style={styles.infoValue}>{totalEpisodes}</Text>
+              </View>}
+            {anime.episodeDuration && <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Durata episodio</Text>
+                <Text style={styles.infoValue}>{anime.episodeDuration}</Text>
+              </View>}
             {anime.status && <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>Stato</Text>
                 <Text style={styles.infoValue}>{anime.status}</Text>
               </View>}
-            {anime.studio && <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Studio</Text>
-                <Text style={styles.infoValue}>{anime.studio}</Text>
-              </View>}
-            {anime.episodeDuration && <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Durata episodi</Text>
-                <Text style={styles.infoValue}>{anime.episodeDuration}</Text>
+            {(anime.releaseDate || anime.year) && <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Anno</Text>
+                <Text style={styles.infoValue}>{anime.releaseDate || anime.year}</Text>
               </View>}
             {anime.season && <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>Stagione</Text>
                 <Text style={styles.infoValue}>{anime.season}</Text>
               </View>}
+            {anime.studio && <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Studio</Text>
+                <Text style={styles.infoValue}>{anime.studio}</Text>
+              </View>}
+            {ratingDisplay && <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Valutazione</Text>
+                <Text style={styles.infoValue}>{ratingDisplay}</Text>
+              </View>}
+            {anime.favoritesText && <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Preferiti</Text>
+                <Text style={styles.infoValue}>{anime.favoritesText}</Text>
+              </View>}
+            {anime.membersText && <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Membri</Text>
+                <Text style={styles.infoValue}>{anime.membersText}</Text>
+              </View>}
+            {viewsDisplay && <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Visite</Text>
+                <Text style={styles.infoValue}>{viewsDisplay}</Text>
+              </View>}
             {anime.audio && <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>Audio</Text>
                 <Text style={styles.infoValue}>{anime.audio}</Text>
               </View>}
-            {anime.category && <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Categoria</Text>
-                <Text style={styles.infoValue}>{anime.category}</Text>
-              </View>}
             {anime.nextEpisode && <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>Prossimo episodio</Text>
                 <Text style={styles.infoValue}>{anime.nextEpisode}</Text>
-              </View>}
-            {viewsDisplay && <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Visualizzazioni</Text>
-                <Text style={styles.infoValue}>{viewsDisplay}</Text>
               </View>}
           </View>
 
@@ -621,7 +670,7 @@ const AnimeDetailScreen = () => {
         <View style={styles.episodesSection}>
           <View style={styles.episodesHeader}>
             <Text style={styles.sectionTitle}>Episodi ({totalEpisodes})</Text>
-            {totalEpisodes > PAGE_SIZE && <View style={styles.pagerRow}>
+            {listedEpisodes > PAGE_SIZE && <View style={styles.pagerRow}>
                 <TouchableOpacity style={[styles.pagerButton, currentPage <= 1 && styles.pagerButtonDisabled]} disabled={currentPage <= 1} onPress={() => setCurrentPage(p => Math.max(1, p - 1))} activeOpacity={0.7}>
                   <Ionicons name="chevron-back" size={18} color={currentPage <= 1 ? '#666' : theme.colorPalette.text.primary} />
                 </TouchableOpacity>
@@ -642,6 +691,20 @@ const AnimeDetailScreen = () => {
           }} keyExtractor={item => item.toString()} numColumns={numColumns} contentContainerStyle={styles.episodesGrid} scrollEnabled={false} />
           </View>
         </View>
+        {anime.relatedAnime && anime.relatedAnime.length > 0 && <View style={styles.relatedSection}>
+            <Text style={styles.sectionTitle}>Anime correlati</Text>
+            <FlatList
+              horizontal
+              data={anime.relatedAnime}
+              renderItem={({ item }) => <RelatedAnimeCard
+                  anime={item}
+                  onPress={() => router.push({ pathname: '/anime', params: { url: item.url } })}
+                />}
+              keyExtractor={item => item.id}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.relatedList}
+            />
+          </View>}
       </AnimatedScrollView>
     </View>;
 };
@@ -846,6 +909,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: theme.typography.fontFamily.primaryBold
   },
+  genresSection: {
+    marginTop: 24
+  },
+  genreChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
+  },
+  genreChip: {
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 4,
+    backgroundColor: theme.colorPalette.surface.raised
+  },
+  genreChipText: {
+    color: theme.colorPalette.text.secondary,
+    fontSize: 13,
+    fontFamily: theme.typography.fontFamily.primaryBold
+  },
   infoGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -925,6 +1009,46 @@ const styles = StyleSheet.create({
   },
   episodesGrid: {
     paddingBottom: 20
+  },
+  relatedSection: {
+    marginTop: 26,
+    paddingHorizontal: 20
+  },
+  relatedList: {
+    paddingBottom: 12
+  },
+  relatedCard: {
+    width: 142,
+    marginRight: 12
+  },
+  relatedImage: {
+    width: 142,
+    height: 210,
+    justifyContent: 'flex-end',
+    backgroundColor: theme.colorPalette.surface.raised
+  },
+  relatedImageStyle: {
+    borderRadius: 6
+  },
+  relatedGradient: {
+    minHeight: 92,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 10,
+    paddingVertical: 11,
+    borderBottomLeftRadius: 6,
+    borderBottomRightRadius: 6
+  },
+  relatedTitle: {
+    color: theme.colorPalette.text.primary,
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: theme.typography.fontFamily.primaryBold
+  },
+  relatedSubtitle: {
+    color: theme.colorPalette.text.tertiary,
+    fontSize: 10,
+    marginTop: 5,
+    fontFamily: theme.typography.fontFamily.primary
   },
   episodeButtonContainer: {
     width: '25%',

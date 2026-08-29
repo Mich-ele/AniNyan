@@ -6,11 +6,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../styles/theme';
 import { useHideTabBarOnScroll } from '../../hooks/useTabBarVisibility';
 import {
+  AnimeProvider,
   DEFAULT_USER_PREFERENCES,
   UserPreferences,
   getUserPreferences,
   saveUserPreferences,
 } from '../../services/userPreferences';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 type ToggleSettingProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -27,6 +29,28 @@ type ValueSettingProps = {
   value: string;
   onPress: () => void;
 };
+
+type SourceOption = {
+  id: AnimeProvider;
+  title: string;
+  description: string;
+  icon: keyof typeof Ionicons.glyphMap;
+};
+
+const SOURCE_OPTIONS: SourceOption[] = [
+  {
+    id: 'animeunity',
+    title: 'AnimeUnity',
+    description: 'Utilizza AnimeUnity',
+    icon: 'layers-outline',
+  },
+  {
+    id: 'animeworld',
+    title: 'AnimeWorld',
+    description: 'Utilizza AnimeWorld',
+    icon: 'earth-outline',
+  },
+];
 
 const ToggleSetting = ({ icon, title, description, value, onValueChange }: ToggleSettingProps) => (
   <View style={styles.settingRow}>
@@ -61,6 +85,43 @@ const ValueSetting = ({ icon, title, description, value, onPress }: ValueSetting
       <Ionicons name="chevron-forward" size={16} color={theme.colorPalette.text.tertiary} />
     </View>
   </TouchableOpacity>
+);
+
+const SourceSelector = ({
+  value,
+  onValueChange,
+}: {
+  value: AnimeProvider;
+  onValueChange: (value: AnimeProvider) => void;
+}) => (
+  <View style={styles.sourceSelector}>
+    {SOURCE_OPTIONS.map(option => {
+      const isSelected = option.id === value;
+      return (
+        <TouchableOpacity
+          key={option.id}
+          style={[styles.sourceOption, isSelected && styles.sourceOptionSelected]}
+          activeOpacity={0.82}
+          onPress={() => onValueChange(option.id)}
+        >
+          <View style={[styles.sourceIcon, isSelected && styles.sourceIconSelected]}>
+            <Ionicons
+              name={option.icon}
+              size={21}
+              color={isSelected ? '#ffffff' : theme.colorPalette.text.secondary}
+            />
+          </View>
+          <View style={styles.sourceCopy}>
+            <Text style={[styles.sourceTitle, isSelected && styles.sourceTitleSelected]}>{option.title}</Text>
+            <Text style={styles.sourceDescription}>{option.description}</Text>
+          </View>
+          <View style={[styles.sourceRadio, isSelected && styles.sourceRadioSelected]}>
+            {isSelected && <View style={styles.sourceRadioDot} />}
+          </View>
+        </TouchableOpacity>
+      );
+    })}
+  </View>
 );
 
 const SettingsScreen = () => {
@@ -105,10 +166,10 @@ const SettingsScreen = () => {
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <Stack.Screen options={{ headerShown: false }} />
-        <View style={styles.header}>
+        <Animated.View entering={FadeInDown.duration(240)} style={styles.header}>
           <Text style={styles.headerEyebrow}>IMPOSTAZIONI</Text>
           <Text style={styles.headerTitle}>Il tuo profilo</Text>
-        </View>
+        </Animated.View>
 
         <ScrollView
           contentContainerStyle={styles.content}
@@ -116,6 +177,16 @@ const SettingsScreen = () => {
           onScroll={onTabBarScroll}
           scrollEventThrottle={16}
         >
+          <Animated.View entering={FadeInDown.delay(70).duration(260)}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionEyebrow}>SORGENTE</Text>
+            <Text style={styles.sectionTitle}>Scegli la sorgente</Text>
+          </View>
+          <SourceSelector
+            value={preferences.animeProvider}
+            onValueChange={value => updatePreference('animeProvider', value)}
+          />
+
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionEyebrow}>RIPRODUZIONE</Text>
             <Text style={styles.sectionTitle}>Guarda come preferisci</Text>
@@ -157,6 +228,7 @@ const SettingsScreen = () => {
               onValueChange={value => updatePreference('reduceMotion', value)}
             />
           </View>
+          </Animated.View>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -212,6 +284,75 @@ const styles = StyleSheet.create({
     color: theme.colorPalette.text.primary,
     fontSize: 18,
     fontFamily: theme.typography.fontFamily.primaryBold,
+  },
+  sectionDescription: {
+    color: theme.colorPalette.text.tertiary,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: theme.typography.fontFamily.primary,
+    marginTop: 5,
+  },
+  sourceSelector: {
+    gap: 6,
+    marginBottom: 28,
+  },
+  sourceOption: {
+    minHeight: 82,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    backgroundColor: theme.colorPalette.primary.backgroundSecondary,
+  },
+  sourceOptionSelected: {
+    backgroundColor: 'rgba(244,117,33,0.14)',
+  },
+  sourceIcon: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    backgroundColor: theme.colorPalette.primary.backgroundTertiary,
+  },
+  sourceIconSelected: {
+    backgroundColor: theme.colorPalette.accent.primary,
+  },
+  sourceCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  sourceTitle: {
+    color: theme.colorPalette.text.primary,
+    fontSize: 15,
+    fontFamily: theme.typography.fontFamily.primaryBold,
+    marginBottom: 4,
+  },
+  sourceTitleSelected: {
+    color: theme.colorPalette.accent.secondary,
+  },
+  sourceDescription: {
+    color: theme.colorPalette.text.tertiary,
+    fontSize: 11,
+    lineHeight: 15,
+    fontFamily: theme.typography.fontFamily.primary,
+  },
+  sourceRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colorPalette.primary.backgroundTertiary,
+  },
+  sourceRadioSelected: {
+    backgroundColor: theme.colorPalette.accent.primary,
+  },
+  sourceRadioDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#ffffff',
   },
   settingsGroup: {
     gap: 2,

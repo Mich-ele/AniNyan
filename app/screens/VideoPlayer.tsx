@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Animated, Pressable, Text, Platform, PermissionsAndroid } from 'react-native';
+import { View, StyleSheet, Animated, Easing, Pressable, Text, Platform, PermissionsAndroid } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import type { CastSession, MediaStatus } from 'react-native-google-cast';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -269,6 +269,10 @@ export default function VideoPlayerScreen() {
       return;
     }
 
+    if (/\.mp4(?:$|[?#])/i.test(activeVideoUrl)) {
+      player.subtitleTrack = null;
+    }
+
     const italianTrack = (track: { language: string; label: string }) => {
       const language = track.language.toLowerCase();
       const label = track.label.toLowerCase();
@@ -283,11 +287,15 @@ export default function VideoPlayerScreen() {
       return;
     }
 
+    if (/\.mp4(?:$|[?#])/i.test(activeVideoUrl)) {
+      return;
+    }
+
     const italianSubtitles = player.availableSubtitleTracks.find(italianTrack);
     if (italianSubtitles) {
       player.subtitleTrack = italianSubtitles;
     }
-  }, [player, preferences.audioPreference, preferencesReady, trackVersion, videoLoaded]);
+  }, [activeVideoUrl, player, preferences.audioPreference, preferencesReady, trackVersion, videoLoaded]);
 
   const getAnimeDetails = useCallback(async () => {
     if (animeDetailsRef.current) return animeDetailsRef.current;
@@ -451,7 +459,8 @@ export default function VideoPlayerScreen() {
   useEffect(() => {
     Animated.timing(controlsOpacity, {
       toValue: showControls ? 1 : 0,
-      duration: preferences.reduceMotion ? 0 : 200,
+      duration: preferences.reduceMotion ? 0 : showControls ? 240 : 180,
+      easing: showControls ? Easing.out(Easing.cubic) : Easing.in(Easing.quad),
       useNativeDriver: true,
     }).start();
   }, [controlsOpacity, preferences.reduceMotion, showControls]);
@@ -751,6 +760,7 @@ export default function VideoPlayerScreen() {
         isCasting={isCasting}
         hasNextEpisode={activeNextEpisodeNumber !== null}
         isNextEpisodeLoading={isLoadingNextEpisode}
+        reduceMotion={preferences.reduceMotion}
       />
     </View>
   );

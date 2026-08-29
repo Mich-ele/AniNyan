@@ -1,8 +1,11 @@
+export type AnimeSource = 'animeworld' | 'animeunity';
+
 export interface Anime {
   id: string;
   title: string;
   image: string;
   url: string;
+  source?: AnimeSource;
   subtitle?: string;
   logo?: string;
   progress?: number;
@@ -30,12 +33,15 @@ export interface AnimeDetail extends Anime {
   episodeList?: Episode[];
   ratingText?: string;
   viewsText?: string;
+  favoritesText?: string;
+  membersText?: string;
   category?: string;
   audio?: string;
   season?: string;
   nextEpisode?: string;
   anilistLink?: string;
   myanimelistLink?: string;
+  relatedAnime?: Anime[];
 }
 
 export interface TopAnimeSections {

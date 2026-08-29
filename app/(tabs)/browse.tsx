@@ -8,9 +8,9 @@ import {
   View,
   Dimensions,
 } from 'react-native';
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { searchAnimeAdvancedWithMeta } from '../../services/scraperManager';
 import { Anime } from '../../types/anime';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +22,18 @@ import {
   AnimeWorldFilterGroup,
   DEFAULT_ANIMEWORLD_FILTERS,
 } from '../../data/animeWorldFilters';
+import { AnimeProvider, getUserPreferences } from '../../services/userPreferences';
+import {
+  ANIMEUNITY_FILTER_GROUPS,
+  DEFAULT_ANIMEUNITY_FILTERS,
+} from '../../data/animeUnityFilters';
+import Animated, {
+  FadeIn,
+  FadeInDown,
+  FadeOut,
+  FadeOutUp,
+  LinearTransition,
+} from 'react-native-reanimated';
 
 const { width } = Dimensions.get('window');
 const numColumns = 2;
@@ -57,7 +69,7 @@ const Browse = () => {
   const [results, setResults] = useState<Anime[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedFilters, setSelectedFilters] = useState<Record<string, string[]>>(
-    DEFAULT_ANIMEWORLD_FILTERS,
+    DEFAULT_ANIMEUNITY_FILTERS,
   );
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
@@ -68,34 +80,76 @@ const Browse = () => {
   const [hasNext, setHasNext] = useState(false);
   const [hasPrev, setHasPrev] = useState(false);
   const [totalPages, setTotalPages] = useState<number | undefined>(undefined);
+  const [activeProvider, setActiveProvider] = useState<AnimeProvider>('animeunity');
+  const providerRef = useRef<AnimeProvider | null>(null);
+
+  const availableFilterGroups = useMemo(
+    () => activeProvider === 'animeunity'
+      ? ANIMEUNITY_FILTER_GROUPS
+      : ANIMEWORLD_FILTER_GROUPS,
+    [activeProvider],
+  );
 
   const filtersQuery = useMemo(() => {
-    const optionsQuery = ANIMEWORLD_FILTER_GROUPS.flatMap(group => {
+    const optionsQuery = availableFilterGroups.flatMap(group => {
       const ids = selectedFilters[group.id] || [];
       return ids
         .map(id => group.options.find(o => o.id === id)?.query || '')
         .filter(Boolean);
     }).join('');
-    const studioQuery = studio.trim() ? `&studio=${encodeURIComponent(studio.trim())}` : '';
-    const genreModeQuery = genreAndMode ? '&genre_mode=and' : '';
+    const studioQuery = activeProvider === 'animeworld' && studio.trim()
+      ? `&studio=${encodeURIComponent(studio.trim())}`
+      : '';
+    const genreModeQuery = activeProvider === 'animeworld' && genreAndMode ? '&genre_mode=and' : '';
     return `${optionsQuery}${studioQuery}${genreModeQuery}`;
-  }, [genreAndMode, selectedFilters, studio]);
+  }, [activeProvider, availableFilterGroups, genreAndMode, selectedFilters, studio]);
 
   const activeFilterCount = useMemo(
-    () => Object.values(selectedFilters).reduce((total, ids) => total + ids.length, 0) +
-      (studio.trim() ? 1 : 0) + (genreAndMode ? 1 : 0),
-    [genreAndMode, selectedFilters, studio],
+    () => availableFilterGroups.reduce(
+      (total, group) => total + (selectedFilters[group.id] || []).length,
+      0,
+    ) + (activeProvider === 'animeworld' && studio.trim() ? 1 : 0)
+      + (activeProvider === 'animeworld' && genreAndMode ? 1 : 0),
+    [activeProvider, availableFilterGroups, genreAndMode, selectedFilters, studio],
   );
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    const syncProvider = async () => {
+      const provider = (await getUserPreferences()).animeProvider;
+      if (!active) return;
+      setActiveProvider(provider);
+      if (providerRef.current !== provider) {
+        setResults([]);
+        setSelectedFilters(
+          provider === 'animeunity' ? DEFAULT_ANIMEUNITY_FILTERS : DEFAULT_ANIMEWORLD_FILTERS,
+        );
+        setExpandedGroups({});
+        setOptionSearch({});
+        setStudio('');
+        setGenreAndMode(false);
+        setPage(1);
+        setHasNext(false);
+        setHasPrev(false);
+        setTotalPages(undefined);
+      }
+      providerRef.current = provider;
+    };
+    void syncProvider();
+    return () => {
+      active = false;
+    };
+  }, []));
 
   const toggleFilterOption = (group: AnimeWorldFilterGroup, optionId: string) => {
     setSelectedFilters(prev => {
       const current = prev[group.id] || [];
+      const exists = current.includes(optionId);
       if (group.multi) {
-        const exists = current.includes(optionId);
         const next = exists ? current.filter(id => id !== optionId) : [...current, optionId];
         return { ...prev, [group.id]: next };
       }
-      return { ...prev, [group.id]: [optionId] };
+      return { ...prev, [group.id]: exists ? [] : [optionId] };
     });
   };
 
@@ -110,7 +164,9 @@ const Browse = () => {
   };
 
   const handleResetFilters = () => {
-    setSelectedFilters(DEFAULT_ANIMEWORLD_FILTERS);
+    setSelectedFilters(
+      activeProvider === 'animeunity' ? DEFAULT_ANIMEUNITY_FILTERS : DEFAULT_ANIMEWORLD_FILTERS,
+    );
     setOptionSearch({});
     setStudio('');
     setGenreAndMode(false);
@@ -157,9 +213,17 @@ const Browse = () => {
   );
 
   const listHeader = (
-    <View style={styles.headerWrapper}>
+    <Animated.View entering={FadeInDown.duration(260)} style={styles.headerWrapper}>
       <View style={styles.header}>
-        <Text style={styles.eyebrow}>Catalogo</Text>
+        <View style={styles.headerMeta}>
+          <Text style={styles.eyebrow}>Catalogo</Text>
+          <View style={styles.providerBadge}>
+            <Ionicons name="server-outline" size={12} color={theme.colorPalette.accent.primary} />
+            <Text style={styles.providerBadgeText}>
+              {activeProvider === 'animeunity' ? 'AnimeUnity' : 'AnimeWorld'}
+            </Text>
+          </View>
+        </View>
         <Text style={styles.title}>Cerca un anime</Text>
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={20} color={theme.colorPalette.text.secondary} style={styles.searchIcon} />
@@ -177,11 +241,13 @@ const Browse = () => {
           </TouchableOpacity>
         </View>
         {loading && (
-          <ActivityIndicator
-            style={styles.loadingIndicator}
-            size="small"
-            color={theme.colorPalette.text.primary}
-          />
+          <Animated.View entering={FadeIn.duration(140)} exiting={FadeOut.duration(120)}>
+            <ActivityIndicator
+              style={styles.loadingIndicator}
+              size="small"
+              color={theme.colorPalette.text.primary}
+            />
+          </Animated.View>
         )}
       </View>
       <View style={styles.filtersSection}>
@@ -210,9 +276,13 @@ const Browse = () => {
           </View>
         </TouchableOpacity>
         {isAdvancedOpen && (
-          <>
+          <Animated.View
+            entering={FadeInDown.duration(220)}
+            exiting={FadeOutUp.duration(160)}
+            layout={LinearTransition.duration(180)}
+          >
         <View style={styles.filtersList}>
-          {ANIMEWORLD_FILTER_GROUPS.map(group => {
+          {availableFilterGroups.map(group => {
             const selectedIds = selectedFilters[group.id] || [];
             const isExpanded = expandedGroups[group.id] ?? false;
             const searchValue = optionSearch[group.id] || '';
@@ -226,8 +296,9 @@ const Browse = () => {
               ? group.options.filter(option => option.label.toLowerCase().includes(searchValue.trim().toLowerCase()))
               : group.options;
             return (
-              <View
+              <Animated.View
                 key={group.id}
+                layout={LinearTransition.duration(180)}
                 style={[styles.filterGroup, isExpanded && styles.filterGroupExpanded]}
               >
                 <TouchableOpacity
@@ -264,7 +335,11 @@ const Browse = () => {
                   />
                 </TouchableOpacity>
                 {isExpanded && (
-                  <View style={styles.filterExpandedContent}>
+                  <Animated.View
+                    entering={FadeInDown.duration(180)}
+                    exiting={FadeOut.duration(120)}
+                    style={styles.filterExpandedContent}
+                  >
                     {group.options.length > 12 && (
                       <View style={styles.optionSearchContainer}>
                         <Ionicons name="search-outline" size={17} color={theme.colorPalette.text.tertiary} />
@@ -277,7 +352,7 @@ const Browse = () => {
                         />
                       </View>
                     )}
-                    {group.id === 'genres' && (
+                    {group.id === 'genres' && activeProvider === 'animeworld' && (
                       <TouchableOpacity
                         style={[styles.genreModeRow, genreAndMode && styles.genreModeRowActive]}
                         onPress={() => setGenreAndMode(value => !value)}
@@ -318,12 +393,12 @@ const Browse = () => {
                       );
                     })}
                     </View>
-                  </View>
+                  </Animated.View>
                 )}
-              </View>
+              </Animated.View>
             );
           })}
-          <View style={styles.studioGroup}>
+          {activeProvider === 'animeworld' && <View style={styles.studioGroup}>
             <View style={styles.filterGroupIcon}>
               <Ionicons name="business-outline" size={18} color={studio ? theme.colorPalette.accent.primary : theme.colorPalette.text.tertiary} />
             </View>
@@ -342,7 +417,7 @@ const Browse = () => {
                 <Ionicons name="close" size={17} color={theme.colorPalette.text.secondary} />
               </TouchableOpacity>
             )}
-          </View>
+          </View>}
         </View>
         <View style={styles.actionsRow}>
           <TouchableOpacity style={styles.resetButton} onPress={handleResetFilters}>
@@ -364,10 +439,10 @@ const Browse = () => {
             <Text style={styles.searchButtonText}>Cerca</Text>
           </TouchableOpacity>
         </View>
-          </>
+          </Animated.View>
         )}
       </View>
-    </View>
+    </Animated.View>
   );
 
   return (
@@ -383,7 +458,7 @@ const Browse = () => {
             ListHeaderComponent={listHeader}
             ListFooterComponent={() => (
               results.length > 0 ? (
-                <View style={styles.paginationContainer}>
+                <Animated.View entering={FadeIn.duration(180)} style={styles.paginationContainer}>
                   <TouchableOpacity
                     style={[styles.pageButton, (!hasPrev || page <= 1) && styles.pageButtonDisabled]}
                     onPress={() => hasPrev && page > 1 && handleSearch(page - 1)}
@@ -401,14 +476,16 @@ const Browse = () => {
                     <Text style={[styles.pageButtonText, !hasNext && styles.pageButtonTextDisabled]}></Text>
                     <Ionicons name="chevron-forward" size={16} color={!hasNext ? theme.colorPalette.text.secondary : '#000'} />
                   </TouchableOpacity>
-                </View>
+                </Animated.View>
               ) : null
             )}
             ListEmptyComponent={() =>
-              !loading && query.trim().length > 0 && (
-                <View style={styles.emptyContainer}>
-                  <Text style={styles.emptyText}>Nessun risultato per {query}</Text>
-                </View>
+              !loading && (query.trim().length > 0 || activeFilterCount > 0) && (
+                <Animated.View entering={FadeInDown.duration(220)} style={styles.emptyContainer}>
+                  <Text style={styles.emptyText}>
+                    {query.trim() ? `Nessun risultato per ${query}` : 'Nessun risultato con questi filtri'}
+                  </Text>
+                </Animated.View>
               )
             }
             showsVerticalScrollIndicator={false}
@@ -436,6 +513,11 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 12,
   },
+  headerMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   eyebrow: {
     color: theme.colorPalette.accent.primary,
     fontSize: 12,
@@ -444,6 +526,20 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginTop: 12,
     marginBottom: 6,
+  },
+  providerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    height: 28,
+    backgroundColor: theme.colorPalette.primary.backgroundSecondary,
+    marginTop: 8,
+  },
+  providerBadgeText: {
+    color: theme.colorPalette.text.secondary,
+    fontSize: 11,
+    fontFamily: theme.typography.fontFamily.primaryBold,
   },
   title: {
     color: theme.colorPalette.text.primary,
