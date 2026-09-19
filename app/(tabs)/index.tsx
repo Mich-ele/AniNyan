@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, Image, ActivityIndicator, Dimensions, StatusBar, RefreshControl, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect, Stack } from 'expo-router';
-import { useNavigation } from '@react-navigation/native';
+import { useRouter, useFocusEffect, Stack, useNavigation } from 'expo-router';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
@@ -36,19 +35,21 @@ const AnimatedCard = ({
       scale: scale.value
     }]
   }));
-  return <AnimatedPressable onPress={onPress} onPressIn={() => {
-    scale.value = withSpring(0.96, {
-      damping: 20,
-      stiffness: 400
-    });
-  }} onPressOut={() => {
-    scale.value = withSpring(1, {
-      damping: 20,
-      stiffness: 400
-    });
-  }} entering={FadeInDown.duration(400).delay(Math.min(index * 50, 500))} style={[style, animatedStyle]}>
-      {children}
-    </AnimatedPressable>;
+  return <Animated.View entering={FadeInDown.duration(400).delay(Math.min(index * 50, 500))} style={style}>
+      <AnimatedPressable onPress={onPress} onPressIn={() => {
+        scale.value = withSpring(0.96, {
+          damping: 20,
+          stiffness: 400
+        });
+      }} onPressOut={() => {
+        scale.value = withSpring(1, {
+          damping: 20,
+          stiffness: 400
+        });
+      }} style={[styles.animatedCardPressable, animatedStyle]}>
+        {children}
+      </AnimatedPressable>
+    </Animated.View>;
 };
 const AnimatedHeroButton = ({
   onPress,
@@ -690,6 +691,9 @@ export default function HomeScreen() {
     </HomeErrorBoundary>;
 }
 const styles = StyleSheet.create({
+  animatedCardPressable: {
+    flex: 1
+  },
   container: {
     flex: 1,
     backgroundColor: theme.colorPalette.primary.background

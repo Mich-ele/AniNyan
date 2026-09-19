@@ -3,7 +3,7 @@ import { Home, Search, Bookmark, Settings } from 'lucide-react-native';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
-import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import Animated, {
   Easing,
   FadeIn,
@@ -33,7 +33,7 @@ const TabBackground = () => (
       <BlurView
         intensity={42}
         tint="dark"
-        experimentalBlurMethod="dimezisBlurView"
+        blurMethod="dimezisBlurView"
         style={StyleSheet.absoluteFill}
       />
     )}
@@ -221,11 +221,11 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   fallback: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000000',
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.98)',
   },
 });

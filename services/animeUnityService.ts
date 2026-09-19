@@ -4,6 +4,11 @@ import { Anime, AnimeDetail, CarouselItem, Episode, HomePageSections } from '../
 import { getAnimeIdFromUrl } from '../utils/utils';
 import { PagedSearchResult } from './animeWorldService';
 import { ANIMEUNITY_GENRES } from '../data/animeUnityFilters';
+import {
+  describeDiagnosticError,
+  describeMediaUrl,
+  playbackDiagnostic,
+} from '../utils/playbackDiagnostics';
 
 const ANIMEUNITY_BASE_URL = 'https://www.animeunity.so';
 const PAGE_SIZE = 30;
@@ -655,25 +660,44 @@ export const fetchAnimeDetailsAnimeUnity = async (url: string): Promise<AnimeDet
 };
 
 const getEmbedUrl = async (url: string): Promise<string | null> => {
-  if (/vixcloud\.(?:co|ru)/i.test(url)) return url;
-  const response = await client.get(url, {
-    headers: {
-      'User-Agent': userAgent,
-      Accept: 'application/json, text/plain, */*',
-      Referer: ANIMEUNITY_BASE_URL,
-    },
-  });
-  const data = response.data;
-  if (typeof data === 'string') {
-    const directUrl = data.match(/https?:\/\/[^"'\s]+/i)?.[0];
-    return directUrl || null;
+  if (/vixcloud\.(?:co|ru)/i.test(url)) {
+    playbackDiagnostic('animeunity.embed.direct', { target: describeMediaUrl(url) });
+    return url;
   }
-  if (data && typeof data === 'object') {
-    const value = data as Record<string, unknown>;
-    const candidate = value.url || value.embed_url || value.link;
-    return typeof candidate === 'string' ? candidate : null;
+  const startedAt = Date.now();
+  playbackDiagnostic('animeunity.embed.resolve.start', { target: describeMediaUrl(url) });
+  try {
+    const response = await client.get(url, {
+      headers: {
+        'User-Agent': userAgent,
+        Accept: 'application/json, text/plain, */*',
+        Referer: ANIMEUNITY_BASE_URL,
+      },
+    });
+    const data = response.data;
+    let embedUrl: string | null = null;
+    if (typeof data === 'string') {
+      embedUrl = data.match(/https?:\/\/[^"'\s]+/i)?.[0] || null;
+    } else if (data && typeof data === 'object') {
+      const value = data as Record<string, unknown>;
+      const candidate = value.url || value.embed_url || value.link;
+      embedUrl = typeof candidate === 'string' ? candidate : null;
+    }
+    playbackDiagnostic('animeunity.embed.resolve.success', {
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+      target: describeMediaUrl(url),
+      embed: describeMediaUrl(embedUrl),
+    });
+    return embedUrl;
+  } catch (error) {
+    playbackDiagnostic('animeunity.embed.resolve.error', {
+      durationMs: Date.now() - startedAt,
+      target: describeMediaUrl(url),
+      error: describeDiagnosticError(error),
+    }, 'error');
+    throw error;
   }
-  return null;
 };
 
 const decodeScriptUrl = (value: string): string =>
@@ -681,25 +705,72 @@ const decodeScriptUrl = (value: string): string =>
 
 export const fetchEpisodeVideoUrlAnimeUnity = async (tokenOrUrl: string): Promise<string | null> => {
   const targetUrl = resolveUrl(tokenOrUrl);
-  const embedUrl = await getEmbedUrl(targetUrl);
-  if (!embedUrl) return null;
-  const response = await axios.get(embedUrl, {
-    timeout: 20000,
-    headers: {
-      'User-Agent': userAgent,
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      Referer: ANIMEUNITY_BASE_URL,
-    },
-  });
-  const html = typeof response.data === 'string' ? response.data : String(response.data ?? '');
-  const directUrl = html.match(/window\.downloadUrl\s*=\s*['"](https?:\/\/[^'"]+)['"]/i)?.[1];
-  if (directUrl) return decodeScriptUrl(directUrl);
-  const playlistUrl = html.match(/window\.masterPlaylist\s*=\s*\{[\s\S]*?url:\s*['"](https?:\/\/[^'"]+)['"]/i)?.[1];
-  const token = html.match(/token:\s*['"]([^'"]+)['"]/i)?.[1];
-  const expires = html.match(/expires:\s*['"]([^'"]+)['"]/i)?.[1];
-  if (!playlistUrl) return null;
-  const query = [token ? `token=${encodeURIComponent(token)}` : '', expires ? `expires=${encodeURIComponent(expires)}` : '']
-    .filter(Boolean)
-    .join('&');
-  return `${decodeScriptUrl(playlistUrl)}${query ? `?${query}` : ''}`;
+  const startedAt = Date.now();
+  playbackDiagnostic('animeunity.stream.resolve.start', { target: describeMediaUrl(targetUrl) });
+  try {
+    const embedUrl = await getEmbedUrl(targetUrl);
+    if (!embedUrl) {
+      playbackDiagnostic('animeunity.stream.resolve.empty', {
+        durationMs: Date.now() - startedAt,
+        target: describeMediaUrl(targetUrl),
+      }, 'error');
+      return null;
+    }
+    const response = await axios.get(embedUrl, {
+      timeout: 20000,
+      headers: {
+        'User-Agent': userAgent,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        Referer: ANIMEUNITY_BASE_URL,
+      },
+    });
+    const html = typeof response.data === 'string' ? response.data : String(response.data ?? '');
+    const playlistUrl = html.match(/window\.masterPlaylist\s*=\s*\{[\s\S]*?['"]?url['"]?\s*:\s*['"](https?:\/\/[^'"]+)['"]/i)?.[1];
+    const token = html.match(/['"]?token['"]?\s*:\s*['"]([^'"]+)['"]/i)?.[1];
+    const expires = html.match(/['"]?expires['"]?\s*:\s*['"]([^'"]+)['"]/i)?.[1];
+    const asn = html.match(/['"]?asn['"]?\s*:\s*['"]([^'"]*)['"]/i)?.[1];
+    if (playlistUrl) {
+      const playlist = new URL(decodeScriptUrl(playlistUrl));
+      if (token) playlist.searchParams.set('token', token);
+      if (expires) playlist.searchParams.set('expires', expires);
+      if (asn) playlist.searchParams.set('asn', asn);
+      if (new URL(embedUrl).searchParams.has('canPlayFHD')) {
+        playlist.searchParams.set('h', '1');
+      }
+      const resolvedUrl = playlist.toString();
+      playbackDiagnostic('animeunity.stream.resolve.success', {
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        embed: describeMediaUrl(embedUrl),
+        media: describeMediaUrl(resolvedUrl),
+        delivery: 'hls',
+      });
+      return resolvedUrl;
+    }
+    const directUrl = html.match(/window\.downloadUrl\s*=\s*['"](https?:\/\/[^'"]+)['"]/i)?.[1];
+    if (directUrl) {
+      const resolvedUrl = decodeScriptUrl(directUrl);
+      playbackDiagnostic('animeunity.stream.resolve.success', {
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        embed: describeMediaUrl(embedUrl),
+        media: describeMediaUrl(resolvedUrl),
+        delivery: 'mp4-fallback',
+      });
+      return resolvedUrl;
+    }
+    playbackDiagnostic('animeunity.stream.playlist.missing', {
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+      embed: describeMediaUrl(embedUrl),
+    }, 'error');
+    return null;
+  } catch (error) {
+    playbackDiagnostic('animeunity.stream.resolve.error', {
+      durationMs: Date.now() - startedAt,
+      target: describeMediaUrl(targetUrl),
+      error: describeDiagnosticError(error),
+    }, 'error');
+    throw error;
+  }
 };

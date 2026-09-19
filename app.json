@@ -6,8 +6,8 @@
     "orientation": "portrait",
     "scheme": "myapp",
     "icon": "./assets/images/app-icon.png",
-    "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#000000",
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -67,19 +67,18 @@
         {
           "receiverAppId": "CC1AD845"
         }
-      ]
+      ],
+      [
+        "expo-status-bar",
+        {
+          "hidden": false,
+          "style": "light"
+        }
+      ],
+      "expo-system-ui"
     ],
-    "splash": {
-      "backgroundColor": "#000000",
-      "image": "./assets/images/app-icon.png",
-      "resizeMode": "contain"
-    },
     "experiments": {
       "typedRoutes": true
-    },
-    "androidStatusBar": {
-      "backgroundColor": "#000000",
-      "barStyle": "light-content"
     },
     "extra": {
       "router": {},

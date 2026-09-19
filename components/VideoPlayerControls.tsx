@@ -408,16 +408,16 @@ export const VideoPlayerControls: React.FC<VideoPlayerControlsProps> = (props) =
 
 const styles = StyleSheet.create({
   fullscreenContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   controlsOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'space-between',
     paddingHorizontal: 26,
     paddingVertical: 18,
   },
   bufferingLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -556,7 +556,7 @@ const styles = StyleSheet.create({
     height: 28,
   },
   settingsScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.28)',
   },
   settingsMenu: {

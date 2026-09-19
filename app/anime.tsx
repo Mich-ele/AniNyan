@@ -28,7 +28,7 @@ const EpisodeButton: React.FC<EpisodeButtonProps> = ({
 }) => {
   const fillAnimation = useRef(new Animated.Value(0)).current;
   const selectionAnim = useRef(new Animated.Value(isWatched ? 1 : 0)).current;
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     Animated.timing(selectionAnim, {
       toValue: isWatched ? 1 : 0,
@@ -739,7 +739,7 @@ const styles = StyleSheet.create({
     zIndex: 10
   },
   navBarBackground: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.85)'
   },
   navButton: {
@@ -1072,7 +1072,7 @@ const styles = StyleSheet.create({
     borderRadius: 999
   },
   watchedFillLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(244, 117, 33, 0.25)'
   },
   watchedEpisodeButton: {
@@ -1096,7 +1096,7 @@ const styles = StyleSheet.create({
     padding: 0
   },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.5)',

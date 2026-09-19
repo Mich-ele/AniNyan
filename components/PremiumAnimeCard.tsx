@@ -164,27 +164,30 @@ export function PremiumAnimeCard({
   };
 
   return (
-    <View ref={cardRef} collapsable={false} onTouchEndCapture={handleTouchEnd}>
-      <AnimatedPressable
-        accessibilityRole="button"
-        accessibilityLabel={`Apri ${anime.title}`}
-        onPress={handlePress}
-        onLongPress={handleLongPress}
-        onTouchMove={(event: GestureResponderEvent) => {
-          if (menuVisibleRef.current) {
-            updateDrag(event.nativeEvent.pageX, event.nativeEvent.pageY);
-          }
-        }}
-        onTouchEnd={handleTouchEnd}
-        delayLongPress={360}
-        pressRetentionOffset={{ top: screenHeight, right: screenWidth, bottom: screenHeight, left: screenWidth }}
-        onPressIn={() => {
-          scale.value = withSpring(0.97, { damping: 18, stiffness: 320 });
-        }}
-        onPressOut={handlePressOut}
-        entering={FadeInDown.duration(360).delay(Math.min(index * 45, 360))}
-        style={[styles.card, { width }, style, animatedStyle]}
-      >
+    <Animated.View
+      entering={FadeInDown.duration(360).delay(Math.min(index * 45, 360))}
+      style={[styles.card, { width }, style]}
+    >
+      <View ref={cardRef} collapsable={false} onTouchEndCapture={handleTouchEnd}>
+        <AnimatedPressable
+          accessibilityRole="button"
+          accessibilityLabel={`Apri ${anime.title}`}
+          onPress={handlePress}
+          onLongPress={handleLongPress}
+          onTouchMove={(event: GestureResponderEvent) => {
+            if (menuVisibleRef.current) {
+              updateDrag(event.nativeEvent.pageX, event.nativeEvent.pageY);
+            }
+          }}
+          onTouchEnd={handleTouchEnd}
+          delayLongPress={360}
+          pressRetentionOffset={{ top: screenHeight, right: screenWidth, bottom: screenHeight, left: screenWidth }}
+          onPressIn={() => {
+            scale.value = withSpring(0.97, { damping: 18, stiffness: 320 });
+          }}
+          onPressOut={handlePressOut}
+          style={animatedStyle}
+        >
         <View style={[styles.artwork, { width, height: width * 1.48 }]}>
           <Image source={{ uri: anime.image }} style={styles.image} resizeMode="cover" />
           <LinearGradient
@@ -218,8 +221,9 @@ export function PremiumAnimeCard({
           <View style={styles.metaDot} />
           <Text style={styles.metaAccent}>SUB</Text>
         </View>
-      </AnimatedPressable>
-    </View>
+        </AnimatedPressable>
+      </View>
+    </Animated.View>
   );
 }
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, StyleSheet, Animated, Easing, Pressable, Text, Platform, PermissionsAndroid } from 'react-native';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import { VideoView, useVideoPlayer, type VideoPlayerStatus, type VideoSource } from 'expo-video';
 import type { CastSession, MediaStatus } from 'react-native-google-cast';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -21,7 +21,18 @@ import { fetchAnimeDetailsWithScraper, fetchEpisodeVideoUrl } from '../../servic
 import { DEFAULT_USER_PREFERENCES, UserPreferences, getUserPreferences } from '../../services/userPreferences';
 import type { AnimeDetail } from '../../types/anime';
 import { getAnimeEpisodeNumbers, getEpisodeByNumber } from '../../utils/episodeUtils';
+import {
+  describeDiagnosticError,
+  describeMediaUrl,
+  playbackDiagnostic,
+  sanitizeDiagnosticMessage,
+} from '../../utils/playbackDiagnostics';
 
+const isHlsStream = (url: string): boolean =>
+  /\.m3u8(?:$|[?#])/i.test(url) || /vixcloud\.(?:co|ru)\/playlist\//i.test(url);
+
+const getVideoSource = (url: string): VideoSource =>
+  isHlsStream(url) ? { uri: url, contentType: 'hls' } : url;
 
 export default function VideoPlayerScreen() {
   const { videoUrl, title, animeUrl, episodeNumber, hasNextEpisode, nextEpisodeNumber } = useLocalSearchParams<{
@@ -33,18 +44,21 @@ export default function VideoPlayerScreen() {
     nextEpisodeNumber?: string;
   }>();
   const router = useRouter();
+  const diagnosticSessionId = useRef(`player-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`).current;
   const initialEpisodeNumber = Number(episodeNumber);
   const initialNextEpisodeNumber = Number(nextEpisodeNumber);
   const [activeVideoUrl, setActiveVideoUrl] = useState(videoUrl);
   const [activeEpisodeNumber, setActiveEpisodeNumber] = useState(initialEpisodeNumber);
+  const activeEpisodeNumberRef = useRef(initialEpisodeNumber);
   const [activeNextEpisodeNumber, setActiveNextEpisodeNumber] = useState<number | null>(
     hasNextEpisode === 'true' && Number.isFinite(initialNextEpisodeNumber) ? initialNextEpisodeNumber : null,
   );
   const [isLoadingNextEpisode, setIsLoadingNextEpisode] = useState(false);
-  const player = useVideoPlayer(videoUrl, (player) => {
+  const player = useVideoPlayer(getVideoSource(videoUrl), (player) => {
     player.muted = false;
     player.volume = 1.0;
     player.preservesPitch = true;
+    player.seekTolerance = { toleranceBefore: 1, toleranceAfter: 1 };
     player.timeUpdateEventInterval = 0.5;
     player.audioMixingMode = 'duckOthers';
     player.staysActiveInBackground = false;
@@ -84,9 +98,40 @@ export default function VideoPlayerScreen() {
   const thumbScale = useRef(new Animated.Value(1)).current;
   const isSeeking = useRef(false);
   const seekStartPosition = useRef(0);
+  const isScreenActiveRef = useRef(true);
+  const playbackSnapshotRef = useRef({ currentTime: 0, bufferedPosition: 0 });
+  const pendingLocalSeekRef = useRef<number | null>(null);
+  const localSeekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playerStatusRef = useRef<VideoPlayerStatus>('idle');
+  const commitLocalSeekRef = useRef<(targetTime: number) => void>(() => undefined);
   const castSession = useSafeCastSession();
   const castState = useSafeCastState();
   const isCasting = castState === 'connected' && Boolean(castSession);
+
+  useEffect(() => {
+    isScreenActiveRef.current = true;
+    playbackDiagnostic('player.screen.open', {
+      sessionId: diagnosticSessionId,
+      episode: initialEpisodeNumber,
+      media: describeMediaUrl(videoUrl),
+      anime: describeMediaUrl(animeUrl),
+    });
+    return () => {
+      isScreenActiveRef.current = false;
+      if (localSeekTimeoutRef.current) {
+        clearTimeout(localSeekTimeoutRef.current);
+        localSeekTimeoutRef.current = null;
+      }
+      pendingLocalSeekRef.current = null;
+      playbackDiagnostic('player.screen.close', {
+        sessionId: diagnosticSessionId,
+        episode: activeEpisodeNumberRef.current,
+        media: describeMediaUrl(activeVideoUrlRef.current),
+        currentTime: playbackSnapshotRef.current.currentTime,
+        bufferedPosition: playbackSnapshotRef.current.bufferedPosition,
+      });
+    };
+  }, [animeUrl, diagnosticSessionId, initialEpisodeNumber, videoUrl]);
 
   useEffect(() => {
     const loadPreferences = async () => {
@@ -148,7 +193,7 @@ export default function VideoPlayerScreen() {
 
       const requestId = ++castRequestRef.current;
       const startTime = Math.max(0, player.currentTime || 0);
-      const contentType = /\.m3u8(?:$|\?)/i.test(activeVideoUrl) ? 'application/x-mpegURL' : 'video/mp4';
+      const contentType = isHlsStream(activeVideoUrl) ? 'application/x-mpegURL' : 'video/mp4';
       castTargetRef.current = { session: castSession, videoUrl: activeVideoUrl };
 
       void castSession.client.loadMedia({
@@ -236,10 +281,49 @@ export default function VideoPlayerScreen() {
   }, [player, videoLoaded]);
 
   useEffect(() => {
-    const playingListener = player.addListener('playingChange', (e) => setIsPlaying(e.isPlaying));
-    const statusListener = player.addListener('statusChange', (e) => setIsBuffering(e.status === 'loading'));
+    const playingListener = player.addListener('playingChange', (e) => {
+      setIsPlaying(e.isPlaying);
+      playbackDiagnostic('player.playing.change', {
+        sessionId: diagnosticSessionId,
+        isPlaying: e.isPlaying,
+        episode: activeEpisodeNumberRef.current,
+        currentTime: playbackSnapshotRef.current.currentTime,
+        bufferedPosition: playbackSnapshotRef.current.bufferedPosition,
+      });
+    });
+    const statusListener = player.addListener('statusChange', (e) => {
+      playerStatusRef.current = e.status;
+      setIsBuffering(e.status === 'loading');
+      playbackDiagnostic('player.status.change', {
+        sessionId: diagnosticSessionId,
+        status: e.status,
+        oldStatus: e.oldStatus ?? null,
+        episode: activeEpisodeNumberRef.current,
+        currentTime: playbackSnapshotRef.current.currentTime,
+        bufferedPosition: playbackSnapshotRef.current.bufferedPosition,
+        media: describeMediaUrl(activeVideoUrlRef.current),
+        error: e.error?.message ? sanitizeDiagnosticMessage(e.error.message) : null,
+      }, e.error ? 'error' : 'info');
+      if (e.status === 'readyToPlay' && pendingLocalSeekRef.current !== null && !localSeekTimeoutRef.current) {
+        localSeekTimeoutRef.current = setTimeout(() => {
+          localSeekTimeoutRef.current = null;
+          const pendingTime = pendingLocalSeekRef.current;
+          if (pendingTime !== null) commitLocalSeekRef.current(pendingTime);
+        }, 120);
+      }
+    });
     const sourceListener = player.addListener('sourceLoad', (e) => {
+      playbackDiagnostic('player.source.loaded', {
+        sessionId: diagnosticSessionId,
+        episode: activeEpisodeNumberRef.current,
+        duration: e.duration,
+        media: describeMediaUrl(activeVideoUrlRef.current),
+        audioTracks: e.availableAudioTracks.length,
+        subtitleTracks: e.availableSubtitleTracks.length,
+        videoTracks: e.availableVideoTracks.length,
+      });
       if (e.duration) {
+        playbackSnapshotRef.current = { currentTime: 0, bufferedPosition: 0 };
         loadedSourceRef.current = activeVideoUrlRef.current;
         nextEpisodeRequestedRef.current = false;
         setDuration(e.duration);
@@ -262,7 +346,7 @@ export default function VideoPlayerScreen() {
       audioTracksListener.remove();
       subtitleTracksListener.remove();
     };
-  }, [player]);
+  }, [diagnosticSessionId, player]);
 
   useEffect(() => {
     if (!videoLoaded || !preferencesReady) {
@@ -296,6 +380,60 @@ export default function VideoPlayerScreen() {
       player.subtitleTrack = italianSubtitles;
     }
   }, [activeVideoUrl, player, preferences.audioPreference, preferencesReady, trackVersion, videoLoaded]);
+
+  const cancelPendingLocalSeek = useCallback(() => {
+    if (localSeekTimeoutRef.current) {
+      clearTimeout(localSeekTimeoutRef.current);
+      localSeekTimeoutRef.current = null;
+    }
+    pendingLocalSeekRef.current = null;
+  }, []);
+
+  const commitLocalSeek = useCallback((targetTime: number) => {
+    cancelPendingLocalSeek();
+    if (!isScreenActiveRef.current) return;
+
+    try {
+      player.currentTime = targetTime;
+      playbackSnapshotRef.current = { currentTime: targetTime, bufferedPosition: 0 };
+      playbackDiagnostic('player.seek.commit', {
+        sessionId: diagnosticSessionId,
+        episode: activeEpisodeNumberRef.current,
+        to: targetTime,
+      });
+    } catch (error) {
+      playbackDiagnostic('player.seek.error', {
+        sessionId: diagnosticSessionId,
+        episode: activeEpisodeNumberRef.current,
+        to: targetTime,
+        error: describeDiagnosticError(error),
+      }, 'error');
+    }
+  }, [cancelPendingLocalSeek, diagnosticSessionId, player]);
+
+  useEffect(() => {
+    commitLocalSeekRef.current = commitLocalSeek;
+  }, [commitLocalSeek]);
+
+  const scheduleLocalSeek = useCallback((targetTime: number) => {
+    pendingLocalSeekRef.current = targetTime;
+    playbackSnapshotRef.current.currentTime = targetTime;
+    if (localSeekTimeoutRef.current) {
+      clearTimeout(localSeekTimeoutRef.current);
+    }
+    if (playerStatusRef.current !== 'readyToPlay') {
+      localSeekTimeoutRef.current = null;
+      return;
+    }
+    localSeekTimeoutRef.current = setTimeout(() => {
+      localSeekTimeoutRef.current = null;
+      const pendingTime = pendingLocalSeekRef.current;
+      pendingLocalSeekRef.current = null;
+      if (pendingTime !== null && isScreenActiveRef.current) {
+        commitLocalSeek(pendingTime);
+      }
+    }, 280);
+  }, [commitLocalSeek]);
 
   const getAnimeDetails = useCallback(async () => {
     if (animeDetailsRef.current) return animeDetailsRef.current;
@@ -335,31 +473,74 @@ export default function VideoPlayerScreen() {
     nextEpisodeRequestedRef.current = true;
     setIsLoadingNextEpisode(true);
     let sourceChanged = false;
+    playbackDiagnostic('player.next.start', {
+      sessionId: diagnosticSessionId,
+      episode: activeEpisodeNumber,
+      media: describeMediaUrl(activeVideoUrlRef.current),
+    });
 
     try {
       const anime = await getAnimeDetails();
-      if (!anime) return;
+      if (!isScreenActiveRef.current) return;
+      if (!anime) {
+        playbackDiagnostic('player.next.anime.missing', {
+          sessionId: diagnosticSessionId,
+          episode: activeEpisodeNumber,
+        }, 'error');
+        return;
+      }
 
       const episodeNumbers = getAnimeEpisodeNumbers(anime);
       const currentIndex = episodeNumbers.indexOf(activeEpisodeNumber);
       const nextEpisode = currentIndex >= 0
         ? episodeNumbers[currentIndex + 1]
         : activeNextEpisodeNumber ?? undefined;
-      if (nextEpisode === undefined) return;
+      if (nextEpisode === undefined) {
+        playbackDiagnostic('player.next.episode.missing', {
+          sessionId: diagnosticSessionId,
+          episode: activeEpisodeNumber,
+        }, 'error');
+        return;
+      }
 
       const episode = getEpisodeByNumber(anime, nextEpisode);
       const episodeUrl = episode?.url || (anime.episodeUrl ? `${anime.episodeUrl}${nextEpisode}` : null);
-      if (!episodeUrl) return;
+      if (!episodeUrl) {
+        playbackDiagnostic('player.next.url.missing', {
+          sessionId: diagnosticSessionId,
+          episode: nextEpisode,
+        }, 'error');
+        return;
+      }
 
+      playbackDiagnostic('player.next.resolve.start', {
+        sessionId: diagnosticSessionId,
+        episode: nextEpisode,
+        target: describeMediaUrl(episodeUrl),
+      });
       const nextVideoUrl = await fetchEpisodeVideoUrl(episodeUrl);
-      if (!nextVideoUrl) return;
+      if (!isScreenActiveRef.current) return;
+      if (!nextVideoUrl) {
+        playbackDiagnostic('player.next.resolve.empty', {
+          sessionId: diagnosticSessionId,
+          episode: nextEpisode,
+        }, 'error');
+        return;
+      }
+      playbackDiagnostic('player.next.resolve.success', {
+        sessionId: diagnosticSessionId,
+        episode: nextEpisode,
+        media: describeMediaUrl(nextVideoUrl),
+      });
 
       const nextIndex = episodeNumbers.indexOf(nextEpisode);
       const followingEpisode = nextIndex >= 0 ? episodeNumbers[nextIndex + 1] : undefined;
       const previousVideoUrl = activeVideoUrlRef.current;
       const previousSourceLoaded = loadedSourceRef.current;
+      const previousPlaybackSnapshot = playbackSnapshotRef.current;
       const wasPlaying = player.playing;
 
+      cancelPendingLocalSeek();
       player.pause();
       loadedSourceRef.current = null;
       localAutoplaySourceRef.current = null;
@@ -372,31 +553,61 @@ export default function VideoPlayerScreen() {
       setPosition(0);
       setSliderValue(0);
       setTrackVersion(0);
+      playbackSnapshotRef.current = { currentTime: 0, bufferedPosition: 0 };
+      playbackDiagnostic('player.source.replace.start', {
+        sessionId: diagnosticSessionId,
+        fromEpisode: activeEpisodeNumber,
+        toEpisode: nextEpisode,
+        previousMedia: describeMediaUrl(previousVideoUrl),
+        nextMedia: describeMediaUrl(nextVideoUrl),
+      });
 
       try {
-        await player.replaceAsync(nextVideoUrl);
-      } catch {
+        playerStatusRef.current = 'loading';
+        await player.replaceAsync(getVideoSource(nextVideoUrl));
+      } catch (error) {
+        playbackDiagnostic('player.source.replace.error', {
+          sessionId: diagnosticSessionId,
+          fromEpisode: activeEpisodeNumber,
+          toEpisode: nextEpisode,
+          error: describeDiagnosticError(error),
+        }, 'error');
+        if (!isScreenActiveRef.current) return;
         activeVideoUrlRef.current = previousVideoUrl;
         loadedSourceRef.current = previousSourceLoaded;
+        playbackSnapshotRef.current = previousPlaybackSnapshot;
         setVideoLoaded(Boolean(previousSourceLoaded));
         setIsBuffering(false);
         if (wasPlaying) player.play();
         return;
       }
 
+      if (!isScreenActiveRef.current) return;
       setActiveVideoUrl(nextVideoUrl);
       setActiveEpisodeNumber(nextEpisode);
+      activeEpisodeNumberRef.current = nextEpisode;
       setActiveNextEpisodeNumber(followingEpisode ?? null);
       if (!preferences.autoplay || isCasting) player.pause();
       sourceChanged = true;
       watchedEpisodeWriteRef.current = watchedEpisodeWriteRef.current
         .catch(() => undefined)
         .then(() => addWatchedEpisode(anime, nextEpisode));
+      playbackDiagnostic('player.source.replace.success', {
+        sessionId: diagnosticSessionId,
+        episode: nextEpisode,
+        media: describeMediaUrl(nextVideoUrl),
+      });
+    } catch (error) {
+      playbackDiagnostic('player.next.error', {
+        sessionId: diagnosticSessionId,
+        episode: activeEpisodeNumber,
+        error: describeDiagnosticError(error),
+      }, 'error');
     } finally {
       if (!sourceChanged) nextEpisodeRequestedRef.current = false;
-      setIsLoadingNextEpisode(false);
+      if (isScreenActiveRef.current) setIsLoadingNextEpisode(false);
     }
-  }, [activeEpisodeNumber, activeNextEpisodeNumber, getAnimeDetails, isCasting, isLoadingNextEpisode, player, preferences.autoplay]);
+  }, [activeEpisodeNumber, activeNextEpisodeNumber, cancelPendingLocalSeek, diagnosticSessionId, getAnimeDetails, isCasting, isLoadingNextEpisode, player, preferences.autoplay]);
 
   useEffect(() => {
     if (!isCasting || !castSession) return;
@@ -443,6 +654,10 @@ export default function VideoPlayerScreen() {
 
   useEffect(() => {
     const timeListener = player.addListener('timeUpdate', (e) => {
+      playbackSnapshotRef.current = {
+        currentTime: e.currentTime,
+        bufferedPosition: e.bufferedPosition,
+      };
       setPosition(e.currentTime);
 
       if (!isSeeking.current) {
@@ -481,10 +696,11 @@ export default function VideoPlayerScreen() {
 
 
   const returnToAnime = useCallback(async () => {
+    cancelPendingLocalSeek();
     await watchedEpisodeWriteRef.current.catch(() => undefined);
     await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     router.back();
-  }, [router]);
+  }, [cancelPendingLocalSeek, router]);
 
   const handleBack = () => {
     if (isFullscreen) {
@@ -495,6 +711,13 @@ export default function VideoPlayerScreen() {
   };
 
   const handlePlayPause = useCallback(() => {
+    playbackDiagnostic('player.playback.toggle', {
+      sessionId: diagnosticSessionId,
+      episode: activeEpisodeNumberRef.current,
+      currentTime: isCasting ? position : player.currentTime,
+      isPlaying: isCasting ? isPlaying : player.playing,
+      casting: isCasting,
+    });
     if (isCasting && castSession) {
       const client = castSession.client;
       void client.getMediaStatus().then((status) => {
@@ -513,35 +736,58 @@ export default function VideoPlayerScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     resetAutoHideTimer();
-  }, [castSession, isCasting, player, resetAutoHideTimer]);
+  }, [castSession, diagnosticSessionId, isCasting, isPlaying, player, position, resetAutoHideTimer]);
 
   const handleRewind = useCallback(() => {
-    const currentTime = isCasting ? position : player.currentTime;
+    const currentTime = isCasting
+      ? position
+      : pendingLocalSeekRef.current ?? playbackSnapshotRef.current.currentTime;
     const newTime = Math.max(0, currentTime - 10);
+    playbackDiagnostic('player.seek.request', {
+      sessionId: diagnosticSessionId,
+      episode: activeEpisodeNumberRef.current,
+      method: 'rewind-10',
+      from: currentTime,
+      to: newTime,
+      bufferedPosition: playbackSnapshotRef.current.bufferedPosition,
+      casting: isCasting,
+    });
     if (isCasting && castSession) {
       void castSession.client.seek({ position: newTime }).catch(() => undefined);
     } else {
-      player.currentTime = newTime;
+      scheduleLocalSeek(newTime);
     }
     setPosition(newTime);
     setSliderValue(newTime);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     resetAutoHideTimer();
-  }, [castSession, isCasting, player, position, resetAutoHideTimer]);
+  }, [castSession, diagnosticSessionId, isCasting, position, resetAutoHideTimer, scheduleLocalSeek]);
 
   const handleForward = useCallback(() => {
-    const currentTime = isCasting ? position : player.currentTime;
+    const currentTime = isCasting
+      ? position
+      : pendingLocalSeekRef.current ?? playbackSnapshotRef.current.currentTime;
     const newTime = Math.min(duration, currentTime + 10);
+    playbackDiagnostic('player.seek.request', {
+      sessionId: diagnosticSessionId,
+      episode: activeEpisodeNumberRef.current,
+      method: 'forward-10',
+      from: currentTime,
+      to: newTime,
+      bufferedPosition: playbackSnapshotRef.current.bufferedPosition,
+      duration,
+      casting: isCasting,
+    });
     if (isCasting && castSession) {
       void castSession.client.seek({ position: newTime }).catch(() => undefined);
     } else {
-      player.currentTime = newTime;
+      scheduleLocalSeek(newTime);
     }
     setPosition(newTime);
     setSliderValue(newTime);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     resetAutoHideTimer();
-  }, [castSession, duration, isCasting, player, position, resetAutoHideTimer]);
+  }, [castSession, diagnosticSessionId, duration, isCasting, position, resetAutoHideTimer, scheduleLocalSeek]);
 
   const toggleControls = useCallback(() => {
     setShowControls(prev => {
@@ -608,7 +854,9 @@ export default function VideoPlayerScreen() {
   };
 
   const handleSlidingStart = () => {
+    cancelPendingLocalSeek();
     isSeeking.current = true;
+    seekStartPosition.current = position;
     setShowPreview(true);
     Animated.spring(thumbScale, { toValue: 1.2, useNativeDriver: true }).start();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -618,10 +866,20 @@ export default function VideoPlayerScreen() {
   const handleSlidingComplete = (value: number) => {
     isSeeking.current = false;
     setShowPreview(false);
+    playbackDiagnostic('player.seek.request', {
+      sessionId: diagnosticSessionId,
+      episode: activeEpisodeNumberRef.current,
+      method: 'slider',
+      from: seekStartPosition.current,
+      to: value,
+      bufferedPosition: playbackSnapshotRef.current.bufferedPosition,
+      duration,
+      casting: isCasting,
+    });
     if (isCasting && castSession) {
       void castSession.client.seek({ position: value }).catch(() => undefined);
     } else {
-      player.currentTime = value;
+      scheduleLocalSeek(value);
     }
     setPosition(value);
     Animated.spring(thumbScale, { toValue: 1, useNativeDriver: true }).start();
@@ -777,7 +1035,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   tapZones: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     flexDirection: 'row',
   },
   tapZone: {
